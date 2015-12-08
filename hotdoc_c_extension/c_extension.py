@@ -8,11 +8,12 @@ from hotdoc.core.base_extension import BaseExtension
 from hotdoc.utils.loggable import Loggable
 from hotdoc.core.symbols import *
 from hotdoc.core.comment_block import comment_from_tag
-from hotdoc.lexer_parsers.c_comment_scanner.c_comment_scanner import get_comments
 from hotdoc.core.links import Link
 from hotdoc.core.gi_raw_parser import GtkDocRawCommentParser
 from hotdoc.core.wizard import Skip, QuickStartWizard
 from hotdoc.core.doc_tool import HotdocWizard
+
+from .c_comment_scanner.c_comment_scanner import get_comments
 
 def ast_node_is_function_pointer (ast_node):
     if ast_node.kind == clang.cindex.TypeKind.POINTER and \

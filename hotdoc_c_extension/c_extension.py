@@ -9,8 +9,9 @@ from hotdoc.core.symbols import *
 from hotdoc.core.comment_block import comment_from_tag
 from hotdoc.core.links import Link
 from hotdoc.core.gi_raw_parser import GtkDocRawCommentParser
-from hotdoc.core.wizard import Skip, QuickStartWizard
 from hotdoc.core.doc_tool import HotdocWizard
+
+from hotdoc.utils.wizard import Skip, QuickStartWizard
 
 from .c_comment_scanner.c_comment_scanner import get_comments
 
@@ -131,16 +132,11 @@ class ClangScanner(object):
                             clang.cindex.CursorKind.VAR_DECL]:
                 if self.full_scan:
                     if not node.raw_comment:
-                        self.debug ("Discarding symbol %s at location %s as it has no doc" %
-                                (node.spelling, str(node.location)))
                         continue
 
                     block = self.__raw_comment_parser.parse_comment \
                                 (node.raw_comment, str(node.location.file), 0)
                     self.doc_tool.add_comment(block)
-
-                self.debug ("Found symbol [%s] of kind %s at location %s" %
-                        (node.spelling, str(node.kind), str (node.location)))
 
             if node.spelling in self.symbols:
                 continue

@@ -5,7 +5,6 @@ from ctypes import *
 from fnmatch import fnmatch
 
 from hotdoc.core.base_extension import BaseExtension
-from hotdoc.utils.loggable import Loggable
 from hotdoc.core.symbols import *
 from hotdoc.core.comment_block import comment_from_tag
 from hotdoc.core.links import Link
@@ -23,11 +22,9 @@ def ast_node_is_function_pointer (ast_node):
     return False
 
 
-class ClangScanner(Loggable):
+class ClangScanner(object):
     def __init__(self, doc_tool, full_scan, full_scan_patterns, clang_name=None,
             clang_path=None):
-        Loggable.__init__(self)
-
         if clang_name:
             clang.cindex.Config.set_library_file(clang_name)
         if clang_path:
@@ -71,10 +68,7 @@ class ClangScanner(Loggable):
             if do_full_scan:
                 tu = index.parse(filename, args=args, options=flags)
                 for diag in tu.diagnostics:
-                    if diag.severity <= 2 and str(diag.location.file) not in self.filenames:
-                        self.warning ("Clang issue : %s" % str (diag))
-                    else:
-                        self.error ("Clang issue : %s" % str (diag))
+                    print "Clang issue : %s" % str(diag)
 
                 if tu.diagnostics:
                     return False
@@ -82,8 +76,6 @@ class ClangScanner(Loggable):
                 self.__parse_file (filename, tu)
                 for include in tu.get_includes():
                     self.__parse_file (os.path.abspath(str(include.include)), tu)
-
-        self.info ("%d symbols found" % len (self.symbols))
 
         return True
 

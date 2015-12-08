@@ -22,6 +22,7 @@ class FlexExtension (Extension):
         src_dir = os.path.dirname (self.__flex_sources[0])
         built_scanner_path = src(os.path.join (src_dir, 'scanner.c'))
 
+        self.sources.append(built_scanner_path)
         if newer_group(self.__flex_sources, built_scanner_path):
             cmd = ['flex', '-o', built_scanner_path]
             for s in self.__flex_sources:

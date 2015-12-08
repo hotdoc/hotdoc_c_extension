@@ -10,7 +10,7 @@ from hotdoc.core.symbols import *
 from hotdoc.core.comment_block import comment_from_tag
 from hotdoc.lexer_parsers.c_comment_scanner.c_comment_scanner import get_comments
 from hotdoc.core.links import Link
-from hotdoc.extensions.gi_raw_parser import GtkDocRawCommentParser
+from hotdoc.core.gi_raw_parser import GtkDocRawCommentParser
 from hotdoc.core.wizard import Skip, QuickStartWizard
 from hotdoc.core.doc_tool import HotdocWizard
 
@@ -563,24 +563,6 @@ def flags_from_config(config, path_resolver):
     print "ze flags are", flags
     return flags
 
-def validate_c_extension(wizard):
-    sources = source_files_from_config(wizard.config, wizard)
-
-    if not sources:
-        return
-
-    flags = flags_from_config(wizard.config, wizard)
-
-    print "scanning C sources"
-    scanner = ClangScanner(wizard, False,
-                ['*.h'])
-
-    if not scanner.scan(sources, flags, False, fail_fast=True):
-        if not wizard.ask_confirmation("Scanning failed, try again [y,n]? "):
-            raise Skip
-        return False
-    return True
-
 def resolve_patterns(source_patterns, conf_path_resolver):
     source_files = []
     for item in source_patterns:
@@ -632,9 +614,28 @@ class CExtension(BaseExtension):
         return self.sources
 
     @staticmethod
+    def validate_c_extension(wizard):
+        sources = source_files_from_config(wizard.config, wizard)
+
+        if not sources:
+            return
+
+        flags = flags_from_config(wizard.config, wizard)
+
+        print "scanning C sources"
+        scanner = ClangScanner(wizard, False,
+                    ['*.h'])
+
+        if not scanner.scan(sources, flags, False, fail_fast=True):
+            if not wizard.ask_confirmation("Scanning failed, try again [y,n]? "):
+                raise Skip
+            return False
+        return True
+
+    @staticmethod
     def add_arguments (parser):
         group = parser.add_argument_group('C extension', DESCRIPTION,
-                validate_function=validate_c_extension)
+                validate_function=CExtension.validate_c_extension)
         group.add_argument ("--c-sources", action="store", nargs="+",
                 dest="c_sources", help="C source files to parse",
                 extra_prompt=C_SOURCES_PROMPT,
@@ -657,5 +658,5 @@ class CExtension(BaseExtension):
         group.add_argument('--clang-library-path', action="store",
                 dest="clang_path", help="path to the clang binary")
 
-def get_extension_class():
-    return CExtension
+def get_extension_classes():
+    return [CExtension]

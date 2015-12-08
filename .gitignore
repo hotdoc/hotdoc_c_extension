@@ -1,0 +1,10 @@
+*.pyc
+*.o
+*.hi
+*.swp
+*.so
+*.dot
+build
+dist
+*.egg-info/
+*.eggs

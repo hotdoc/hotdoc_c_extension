@@ -10,8 +10,7 @@ setup(
     description = "An extension for hotdoc that parses C using clang",
     author = "Mathieu Duponchelle",
     packages = find_packages(),
-    entry_points = {'hotdoc.extensions': 'get_extension_class =
-        c_extension:get_extension_class'},
+    entry_points = {'hotdoc.extensions': 'get_extension_classes = c_extension:get_extension_classes'},
     install_requires = [
         'hotdoc>=0.6',
         'clang',

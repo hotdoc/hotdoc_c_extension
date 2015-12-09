@@ -83,7 +83,7 @@ setup(
     cmdclass = {'build_ext': build_ext},
     ext_modules = [c_comment_scanner_module],
     install_requires = [
-        'hotdoc>=0.6',
+        'hotdoc>=0.6.2',
         'clang==3.5',
         'pkgconfig==1.1.0',
     ]

@@ -66,7 +66,7 @@ c_comment_scanner_module = FlexExtension(
 
 setup(
     name = "hotdoc_c_extension",
-    version = "0.6",
+    version = "0.6.2",
     keywords = "C clang hotdoc",
     url='https://github.com/hotdoc/hotdoc_c_extension',
     author_email = 'mathieu.duponchelle@opencreed.com',

@@ -83,6 +83,9 @@ except ValueError as e:
     print "No bindings found for clang version %s" % clang_version
     raise e
 
+if clang_bindings_version == V('3.7'):
+    clang_bindings_version == V('3.7.dev234765')
+
 setup(
     name = "hotdoc_c_extension",
     version = "0.6.3",

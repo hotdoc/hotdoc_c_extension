@@ -85,7 +85,7 @@ except ValueError as e:
 
 setup(
     name = "hotdoc_c_extension",
-    version = "0.6.2",
+    version = "0.6.3",
     keywords = "C clang hotdoc",
     url='https://github.com/hotdoc/hotdoc_c_extension',
     author_email = 'mathieu.duponchelle@opencreed.com',
@@ -102,7 +102,7 @@ setup(
     cmdclass = {'build_ext': build_ext},
     ext_modules = [c_comment_scanner_module],
     install_requires = [
-        'hotdoc>=0.6.2',
+        'hotdoc>=0.6.3',
         'clang==%s' % clang_bindings_version,
         'pkgconfig==1.1.0',
     ]

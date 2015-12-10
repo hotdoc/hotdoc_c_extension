@@ -7,22 +7,30 @@ the user doesn't need to document static functions.
 
 ### Install instructions:
 
-This extension uses the bindings of clang. It explicitly requires
-the clang-3.5 bindings, and you will thus need to install clang 3.5
-for it to work.
+This extension uses the bindings of clang. It has been tested
+with clang-3.5, but it *might* work with other clang versions.
+
+To figure out the clang bindings that need to be installed,
+hotdoc also needs the "llvm-config" program to be in the PATH.
 
 This extension also uses flex for the comment scanner.
 
 On Fedora 22 the dependencies can be installed with:
 
 ```
-dnf install clang-devel flex python-devel
+dnf install clang-devel llvm-devel flex python-devel
 ```
 
-On Debian / Ubuntu:
+On a recent enough Debian / Ubuntu:
 
 ```
-apt-get install libclang-3.5-dev flex python-dev
+apt-get install libclang-3.5-dev llvm-3.5-dev flex python-dev
+```
+
+Otherwise you may still try to install an earlier version of clang with
+
+```
+apt-get install libclang-dev llvm-dev flex python-dev
 ```
 
 If you use this extension in another environment, please let me know

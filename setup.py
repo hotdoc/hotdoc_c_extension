@@ -1,5 +1,6 @@
-import os
+import os, subprocess
 
+from pkg_resources import parse_version as V
 from setuptools import setup, find_packages
 from distutils.core import Extension
 from distutils.errors import DistutilsExecError
@@ -7,6 +8,7 @@ from distutils.dep_util import newer_group
 from distutils.spawn import spawn
 from distutils.command.build_ext import build_ext as _build_ext
 
+from utils.setup_utils import VersionList
 
 source_dir = os.path.abspath('./')
 def src(filename):
@@ -63,6 +65,23 @@ c_comment_scanner_module = FlexExtension(
                             ['hotdoc_c_extension/c_comment_scanner/scanner.l',
                             'hotdoc_c_extension/c_comment_scanner/scanner.h'])
 
+known_clang_versions = VersionList([V('3.2'), V('3.3'), V('3.4'), V('3.5'), V('3.7')])
+
+try:
+    clang_version = subprocess.check_output(['llvm-config', '--version'])
+except OSError as e:
+    print "Error when trying to figure out the clang version"
+    print "llvm-config is probably not installed\n"
+    raise e
+except subprocess.CalledProcessError as e:
+    print "\nUnknown error when trying to figure out the clang version\n"
+    raise e
+
+try:
+    clang_bindings_version = known_clang_versions.find_le(V(clang_version))
+except ValueError as e:
+    print "No bindings found for clang version %s" % clang_version
+    raise e
 
 setup(
     name = "hotdoc_c_extension",
@@ -84,7 +103,7 @@ setup(
     ext_modules = [c_comment_scanner_module],
     install_requires = [
         'hotdoc>=0.6.2',
-        'clang==3.5',
+        'clang==%s' % clang_bindings_version,
         'pkgconfig==1.1.0',
     ]
 )

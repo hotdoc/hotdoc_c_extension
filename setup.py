@@ -84,11 +84,11 @@ except ValueError as e:
     raise e
 
 if clang_bindings_version == V('3.7'):
-    clang_bindings_version == V('3.7.dev234765')
+    clang_bindings_version = V('3.7.dev234765')
 
 setup(
     name = "hotdoc_c_extension",
-    version = "0.6.3.1",
+    version = "0.6.3.2",
     keywords = "C clang hotdoc",
     url='https://github.com/hotdoc/hotdoc_c_extension',
     author_email = 'mathieu.duponchelle@opencreed.com',

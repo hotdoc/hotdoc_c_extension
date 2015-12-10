@@ -1,4 +1,4 @@
-import os, sys, linecache, pkgconfig, glob
+import os, sys, linecache, pkgconfig, glob, subprocess
 
 import clang.cindex
 from ctypes import *
@@ -22,6 +22,11 @@ def ast_node_is_function_pointer (ast_node):
         return True
     return False
 
+def get_clang_headers():
+    version = subprocess.check_output(['llvm-config', '--version']).strip()
+    prefix = subprocess.check_output(['llvm-config', '--prefix']).strip()
+
+    return os.path.join(prefix, 'lib', 'clang', version, 'include')
 
 class ClangScanner(object):
     def __init__(self, doc_tool, full_scan, full_scan_patterns, clang_name=None,
@@ -45,9 +50,9 @@ class ClangScanner(object):
         self.filenames = filenames
 
         # FIXME: er maybe don't do that ?
-        args = ["-isystem/usr/lib/clang/3.5.0/include/", "-Wno-attributes"]
+        args = ["-Wno-attributes"]
+        args.append ("-isystem%s" % get_clang_headers())
         args.extend (options)
-
         self.symbols = {}
         self.parsed = set({})
 
@@ -549,7 +554,6 @@ def flags_from_config(config, path_resolver):
         else:
             flags.append(extra_flag)
 
-    print "ze flags are", flags
     return flags
 
 def resolve_patterns(source_patterns, conf_path_resolver):

@@ -28,9 +28,18 @@ def get_clang_headers():
 
     return os.path.join(prefix, 'lib', 'clang', version, 'include')
 
+def get_clang_libdir():
+    return subprocess.check_output(['llvm-config', '--libdir']).strip()
+
 class ClangScanner(object):
     def __init__(self, doc_tool, full_scan, full_scan_patterns, clang_name=None,
             clang_path=None):
+        # Let's try and find clang ourselves first
+        clang_libdir = get_clang_libdir()
+        if os.path.exists(clang_libdir):
+            clang.cindex.Config.set_library_path(clang_libdir)
+
+        # But let's also let the user have its way
         if clang_name:
             clang.cindex.Config.set_library_file(clang_name)
         if clang_path:

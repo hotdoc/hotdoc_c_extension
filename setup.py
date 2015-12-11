@@ -88,7 +88,7 @@ if clang_bindings_version == V('3.7'):
 
 setup(
     name = "hotdoc_c_extension",
-    version = "0.6.3.4",
+    version = "0.6.3.5",
     keywords = "C clang hotdoc",
     url='https://github.com/hotdoc/hotdoc_c_extension',
     author_email = 'mathieu.duponchelle@opencreed.com',
@@ -106,7 +106,7 @@ setup(
     ext_modules = [c_comment_scanner_module],
     install_requires = [
         'hotdoc>=0.6.3',
-        'clang==%s' % clang_bindings_version,
+        'clang==%s' % str(clang_bindings_version),
         'pkgconfig==1.1.0',
     ]
 )

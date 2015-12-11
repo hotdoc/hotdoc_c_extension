@@ -91,7 +91,7 @@ class ClangScanner(object):
 
         self.parsed.add (filename)
         start = tu.get_location (filename, 0)
-        end = tu.get_location (filename, os.path.getsize(filename))
+        end = tu.get_location (filename, int(os.path.getsize(filename)))
         extent = clang.cindex.SourceRange.from_locations (start, end)
         cursors = self.__get_cursors(tu, extent)
         if filename in self.filenames:

@@ -34,16 +34,17 @@ def get_clang_libdir():
 class ClangScanner(object):
     def __init__(self, doc_tool, full_scan, full_scan_patterns, clang_name=None,
             clang_path=None):
-        # Let's try and find clang ourselves first
-        clang_libdir = get_clang_libdir()
-        if os.path.exists(clang_libdir):
-            clang.cindex.Config.set_library_path(clang_libdir)
+        if not clang.cindex.Config.loaded:
+            # Let's try and find clang ourselves first
+            clang_libdir = get_clang_libdir()
+            if os.path.exists(clang_libdir):
+                clang.cindex.Config.set_library_path(clang_libdir)
 
-        # But let's also let the user have its way
-        if clang_name:
-            clang.cindex.Config.set_library_file(clang_name)
-        if clang_path:
-            clang.cindex.Config.set_library_path(clang_path)
+            # But let's also let the user have its way
+            if clang_name:
+                clang.cindex.Config.set_library_file(clang_name)
+            if clang_path:
+                clang.cindex.Config.set_library_path(clang_path)
 
         self.__raw_comment_parser = GtkDocRawCommentParser(doc_tool)
         self.doc_tool = doc_tool

@@ -410,6 +410,11 @@ class ClangScanner(object):
         l = linecache.getline (str(node.location.file), node.location.line)
         split = l.split()
 
+        if len (split) < 2:
+            print "Found a strange #define, please report this:"
+            print l, str(node.location.file), node.location.line
+            return None
+
         start = node.extent.start.line
         end = node.extent.end.line + 1
         filename = str(node.location.file)

@@ -471,10 +471,13 @@ class ClangScanner(object):
         original_text = '\n'.join(original_lines)
         comment = self.doc_tool.get_comment (node.spelling)
 
+        type_tokens = self.make_c_style_type_name(node.type)
+        type_qs = QualifiedSymbol(type_tokens=type_tokens)
+
         sym = self.doc_tool.get_or_create_symbol(ExportedVariableSymbol, original_text=original_text,
                 comment=self.doc_tool.get_comment (node.spelling),
                 display_name=node.spelling, filename=str(node.location.file),
-                lineno=node.location.line)
+                lineno=node.location.line, type_qs=type_qs)
         return sym
 
 PKG_PROMPT=\

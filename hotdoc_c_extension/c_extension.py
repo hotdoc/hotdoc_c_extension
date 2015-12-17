@@ -335,6 +335,9 @@ class ClangScanner(object):
                     comment=member_comment)
             members.append (member)
 
+        if not public_fields:
+            raw_text = None
+
         return self.doc_tool.get_or_create_symbol(StructSymbol, raw_text=raw_text, members=members,
                 comment=comment, display_name=node.spelling,
                 filename=str(decl.location.file), lineno=decl.location.line)

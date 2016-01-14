@@ -618,14 +618,12 @@ class CExtension(BaseExtension):
                 sources]
 
     def setup(self):
+        stale, unlisted = self.get_stale_files(self.sources)
         self.scanner = ClangScanner(self.doc_tool, False,
                 ['*.h'], clang_name=self.clang_name,
                 clang_path=self.clang_path)
-        self.scanner.scan(self.stale_source_files, self.flags,
+        self.scanner.scan(stale, self.flags,
                 self.doc_tool.incremental)
-
-    def get_source_files(self):
-        return self.sources
 
     @staticmethod
     def validate_c_extension(wizard):

@@ -9,7 +9,7 @@ from hotdoc.core.symbols import *
 from hotdoc.core.comment_block import comment_from_tag
 from hotdoc.core.links import Link
 from hotdoc.core.gi_raw_parser import GtkDocRawCommentParser
-from hotdoc.core.doc_tool import HotdocWizard
+from hotdoc.core.wizard import HotdocWizard
 
 from hotdoc.utils.wizard import Skip, QuickStartWizard
 
@@ -542,6 +542,9 @@ These wildcards will be evaluated each time hotdoc is run.
 """
 
 def validate_pkg_config_packages(wizard, packages):
+    if packages is None:
+        return True
+
     if type(packages) != list:
         print "Incorrect type, expected list or None"
         return False
@@ -563,10 +566,11 @@ def source_files_from_config(config, conf_path_resolver):
 def flags_from_config(config, path_resolver):
     flags = []
 
-    for package in config.get('pkg_config_packages', []):
+    for package in config.get('pkg_config_packages') or []:
         flags.extend(pkgconfig.cflags(package).split(' '))
 
-    extra_flags = config.get('extra_c_flags', [])
+    extra_flags = config.get('extra_c_flags') or []
+
     for extra_flag in extra_flags:
         extra_flag = extra_flag.strip()
         if extra_flag.startswith('-I'):
@@ -578,6 +582,9 @@ def flags_from_config(config, path_resolver):
     return flags
 
 def resolve_patterns(source_patterns, conf_path_resolver):
+    if source_patterns is None:
+        return []
+
     source_files = []
     for item in source_patterns:
         item = conf_path_resolver.resolve_config_path(item)
@@ -586,6 +593,9 @@ def resolve_patterns(source_patterns, conf_path_resolver):
     return source_files
 
 def validate_filters(wizard, thing):
+    if thing is None:
+        return True
+
     if not QuickStartWizard.validate_globs_list(wizard, thing):
         return False
 
@@ -665,10 +675,6 @@ class CExtension(BaseExtension):
         group.add_argument ("--extra-c-flags", action="store", nargs="+",
                 dest="extra_c_flags", help="Extra C flags (-D, -I)",
                 validate_function=QuickStartWizard.validate_list)
-        group.add_argument('--clang-library-name', action="store",
-                dest="clang_name", help="name of the clang binary")
-        group.add_argument('--clang-library-path', action="store",
-                dest="clang_path", help="path to the clang binary")
 
 def get_extension_classes():
     return [CExtension]

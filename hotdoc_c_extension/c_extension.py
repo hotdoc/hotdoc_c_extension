@@ -212,8 +212,8 @@ class ClangScanner(object):
                 t = node.underlying_typedef_type
                 res = t.get_pointee().get_result()
                 type_tokens = self.make_c_style_type_name (res)
-                return_value = ReturnValueSymbol(type_tokens=type_tokens,
-                        comment=return_comment)
+                return_value = [ReturnItemSymbol(type_tokens=type_tokens,
+                        comment=return_comment)]
             else:
                 if comment:
                     param_comment = comment.params.get (child.displayname)
@@ -226,7 +226,7 @@ class ClangScanner(object):
                 parameters.append (parameter)
 
         if not return_value:
-            return_value = ReturnValueSymbol(type_tokens=[], comment=None)
+            return_value = [ReturnItemSymbol(type_tokens=[], comment=None)]
 
         sym = self.doc_tool.get_or_create_symbol(CallbackSymbol, parameters=parameters,
                 return_value=return_value, comment=comment, display_name=node.spelling,
@@ -385,12 +385,12 @@ class ClangScanner(object):
         return sym
 
     def __create_function_macro_symbol (self, node, comment, original_text): 
-        return_value = None
+        return_value = [None]
         if comment:
             return_tag = comment.tags.get ('returns')
             if return_tag:
                 return_comment = comment_from_tag (return_tag)
-                return_value = ReturnValueSymbol (comment=return_comment)
+                return_value = [ReturnItemSymbol (comment=return_comment)]
 
         parameters = []
         if comment:
@@ -443,8 +443,8 @@ class ClangScanner(object):
             return_comment = None
 
         type_tokens = self.make_c_style_type_name (node.result_type)
-        return_value = ReturnValueSymbol (type_tokens=type_tokens,
-                comment=return_comment)
+        return_value = [ReturnItemSymbol (type_tokens=type_tokens,
+                comment=return_comment)]
 
         for param in node.get_arguments():
             if comment:

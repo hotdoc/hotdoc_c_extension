@@ -72,7 +72,7 @@ class ClangScanner(object):
                     cs = get_comments (filename)
                     for c in cs:
                         block = self.__raw_comment_parser.parse_comment(c[0],
-                                c[1], c[2], c[3])
+                                c[1], c[2], c[3], self.doc_tool.include_paths)
                         if block is not None:
                             self.doc_tool.add_comment(block)
 
@@ -149,8 +149,9 @@ class ClangScanner(object):
                     if not node.raw_comment:
                         continue
 
-                    block = self.__raw_comment_parser.parse_comment \
-                                (node.raw_comment, str(node.location.file), 0)
+                    block = self.__raw_comment_parser.parse_comment (
+                        node.raw_comment, str(node.location.file), 0, 0,
+                        self.doc_tool.include_paths)
                     self.doc_tool.add_comment(block)
 
             if node.spelling in self.symbols:

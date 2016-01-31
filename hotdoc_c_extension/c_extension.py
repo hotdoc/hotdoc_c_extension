@@ -4,6 +4,7 @@ import clang.cindex
 from ctypes import *
 from fnmatch import fnmatch
 
+from hotdoc.core import file_includer
 from hotdoc.core.base_extension import BaseExtension
 from hotdoc.core.symbols import *
 from hotdoc.core.comment_block import comment_from_tag
@@ -32,8 +33,7 @@ def get_clang_libdir():
     return subprocess.check_output(['llvm-config', '--libdir']).strip()
 
 class ClangScanner(object):
-    def __init__(self, doc_tool, full_scan, full_scan_patterns, clang_name=None,
-            clang_path=None):
+    def __init__(self, doc_tool, clang_name=None, clang_path=None):
         if not clang.cindex.Config.loaded:
             # Let's try and find clang ourselves first
             clang_libdir = get_clang_libdir()
@@ -48,13 +48,11 @@ class ClangScanner(object):
 
         self.__raw_comment_parser = GtkDocRawCommentParser(doc_tool)
         self.doc_tool = doc_tool
-        self.full_scan = full_scan
-        self.full_scan_patterns = full_scan_patterns
 
-    def scan(self, filenames, options, incremental, fail_fast=False):
+    def scan(self, filenames, options, incremental, full_scan,
+             full_scan_patterns, fail_fast=False):
         index = clang.cindex.Index.create()
-        flags = clang.cindex.TranslationUnit.PARSE_SKIP_FUNCTION_BODIES |\
-                clang.cindex.TranslationUnit.PARSE_INCOMPLETE |\
+        flags = clang.cindex.TranslationUnit.PARSE_INCOMPLETE |\
                 clang.cindex.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD
 
         self.filenames = filenames
@@ -66,7 +64,7 @@ class ClangScanner(object):
         self.symbols = {}
         self.parsed = set({})
 
-        if not self.full_scan:
+        if not full_scan:
             for filename in filenames:
                 with open (filename, 'r') as f:
                     cs = get_comments (filename)
@@ -80,22 +78,24 @@ class ClangScanner(object):
             if filename in self.parsed:
                 continue
 
-            do_full_scan = any(fnmatch(filename, p) for p in self.full_scan_patterns)
+            do_full_scan = any(fnmatch(filename, p) for p in full_scan_patterns)
             if do_full_scan:
                 tu = index.parse(filename, args=args, options=flags)
+
                 for diag in tu.diagnostics:
                     print "Clang issue : %s" % str(diag)
 
                 if tu.diagnostics:
                     return False
 
-                self.__parse_file (filename, tu)
+                self.__parse_file (filename, tu, full_scan)
                 for include in tu.get_includes():
-                    self.__parse_file (os.path.abspath(str(include.include)), tu)
+                    self.__parse_file (os.path.abspath(str(include.include)),
+                                       tu, full_scan)
 
         return True
 
-    def __parse_file (self, filename, tu):
+    def __parse_file (self, filename, tu, full_scan):
         if filename in self.parsed:
             return
 
@@ -105,7 +105,7 @@ class ClangScanner(object):
         extent = clang.cindex.SourceRange.from_locations (start, end)
         cursors = self.__get_cursors(tu, extent)
         if filename in self.filenames:
-            self.__create_symbols (cursors, tu)
+            self.__create_symbols (cursors, tu, full_scan)
 
     # That's the fastest way of obtaining our ast nodes for a given filename
     def __get_cursors (self, tu, extent):
@@ -126,7 +126,7 @@ class ClangScanner(object):
 
         return cursors
 
-    def __create_symbols(self, nodes, tu):
+    def __create_symbols(self, nodes, tu, full_scan):
         for node in nodes:
             node._tu = tu
 
@@ -370,7 +370,7 @@ class ClangScanner(object):
                 display_name=node.spelling, filename=str(node.location.file),
                 lineno=node.location.line)
 
-    def __create_typedef_symbol (self, node): 
+    def __create_typedef_symbol (self, node):
         t = node.underlying_typedef_type
         comment = self.doc_tool.get_comment (node.spelling)
         if ast_node_is_function_pointer (t):
@@ -385,7 +385,7 @@ class ClangScanner(object):
                 sym = self.__create_alias_symbol (node, comment)
         return sym
 
-    def __create_function_macro_symbol (self, node, comment, original_text): 
+    def __create_function_macro_symbol (self, node, comment, original_text):
         return_value = [None]
         if comment:
             return_tag = comment.tags.get ('returns')
@@ -630,11 +630,10 @@ class CExtension(BaseExtension):
 
     def setup(self):
         stale, unlisted = self.get_stale_files(self.sources)
-        self.scanner = ClangScanner(self.doc_tool, False,
-                ['*.h'], clang_name=self.clang_name,
-                clang_path=self.clang_path)
+        self.scanner = ClangScanner(self.doc_tool, clang_name=self.clang_name,
+                                    clang_path=self.clang_path)
         self.scanner.scan(stale, self.flags,
-                self.doc_tool.incremental)
+                          self.doc_tool.incremental, False, ['*.h'])
 
     @staticmethod
     def validate_c_extension(wizard):

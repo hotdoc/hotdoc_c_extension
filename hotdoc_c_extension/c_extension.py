@@ -157,8 +157,9 @@ class ClangScanner(object):
                 continue
 
             sym = None
-            if node.kind == clang.cindex.CursorKind.FUNCTION_DECL:
-                sym = self.__create_function_symbol (node)
+            func_dec = self.__getFunctionDeclNode(node)
+            if func_dec:
+                sym = self.__create_function_symbol(func_dec)
             elif node.kind == clang.cindex.CursorKind.VAR_DECL:
                 sym = self.__create_exported_variable_symbol (node)
             elif node.kind == clang.cindex.CursorKind.MACRO_DEFINITION:
@@ -168,6 +169,23 @@ class ClangScanner(object):
 
             if sym is not None:
                 self.symbols[node.spelling] = sym
+
+    def __getFunctionDeclNode(self, node):
+        if not node.location.file:
+            return None
+        elif node.location.file.name.endswith(".h"):
+            if node.kind == clang.cindex.CursorKind.FUNCTION_DECL:
+                return node
+            else:
+                return None
+
+        if node.kind != clang.cindex.CursorKind.COMPOUND_STMT:
+            return None
+
+        if node.semantic_parent.kind == clang.cindex.CursorKind.FUNCTION_DECL:
+            return node.semantic_parent
+
+        return None
 
     def __apply_qualifiers (self, type_, tokens):
         if type_.is_const_qualified():
@@ -456,9 +474,12 @@ class ClangScanner(object):
             parameter = ParameterSymbol (argname=param.displayname,
                     type_tokens=type_tokens, comment=param_comment)
             parameters.append (parameter)
+
         sym = self.doc_tool.get_or_create_symbol(FunctionSymbol, parameters=parameters,
                 return_value=return_value, comment=comment, display_name=node.spelling,
-                filename=str(node.location.file), lineno=node.location.line)
+                filename=str(node.location.file), lineno=node.location.line,
+                extent_start=node.extent.start.line,
+                extent_end=node.extent.end.line)
 
         return sym
 
@@ -614,6 +635,7 @@ DESCRIPTION =\
 Parse C source files to extract comments and symbols.
 """
 
+
 class CExtension(BaseExtension):
     EXTENSION_NAME = 'c-extension'
 
@@ -626,6 +648,48 @@ class CExtension(BaseExtension):
         self.doc_tool = doc_tool
         self.sources = [os.path.abspath(filename) for filename in
                 sources]
+        file_includer.include_signal.connect(self.__include_file_cb)
+
+    # pylint: disable=no-self-use
+    def __include_file_cb(self, include_path, line_ranges, symbol_name):
+        if not include_path.endswith(".c") or not symbol_name:
+            return None
+
+        if not line_ranges:
+            line_ranges = [(1, -1)]
+        symbol = self.doc_tool.get_symbol(symbol_name)
+        if symbol and symbol.filename != include_path:
+            symbol = None
+
+        if not symbol:
+            scanner = ClangScanner(self.doc_tool, clang_name=self.clang_name,
+                                   clang_path=self.clang_path)
+            scanner.scan([include_path], self.flags,
+                         self.doc_tool.incremental, True, ['*.c', '*.h'])
+            symbol = self.doc_tool.get_symbol(symbol_name)
+
+            if not symbol:
+                print("Trying to include symbol %s but could not be found in "
+                      "%s" % (symbol_name, include_path))
+                return None
+
+        res = "\n```c\n"
+        for n, (start, end) in enumerate(line_ranges):
+            if n != 0:
+                res += "\n...\n"
+
+            start += symbol.extent_start - 2
+            if end > 0:
+                end += (symbol.extent_start - 1)  # We are inclusive here
+            else:
+                end = symbol.extent_end
+
+            with open(include_path, "r") as _:
+                res += "\n".join(_.read().split("\n")[start:end])
+
+        res += "\n```"
+
+        return res
 
     def setup(self):
         stale, unlisted = self.get_stale_files(self.sources)

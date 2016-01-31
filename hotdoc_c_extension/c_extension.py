@@ -141,18 +141,17 @@ class ClangScanner(object):
                 if not unicode(node.location.file) in self.filenames:
                     continue
 
-            if node.kind in [clang.cindex.CursorKind.FUNCTION_DECL,
-                            clang.cindex.CursorKind.TYPEDEF_DECL,
-                            clang.cindex.CursorKind.MACRO_DEFINITION,
-                            clang.cindex.CursorKind.VAR_DECL]:
-                if self.full_scan:
-                    if not node.raw_comment:
-                        continue
-
-                    block = self.__raw_comment_parser.parse_comment (
-                        node.raw_comment, str(node.location.file), 0, 0,
-                        self.doc_tool.include_paths)
-                    self.doc_tool.add_comment(block)
+            # if node.kind in [clang.cindex.CursorKind.FUNCTION_DECL,
+            #                 clang.cindex.CursorKind.TYPEDEF_DECL,
+            #                 clang.cindex.CursorKind.MACRO_DEFINITION,
+            #                 clang.cindex.CursorKind.VAR_DECL]:
+            #     if full_scan:
+            #         if not node.raw_comment:
+            #             continue
+            #         block = self.__raw_comment_parser.parse_comment (
+            #             node.raw_comment, str(node.location.file), 0, 0,
+            #             self.doc_tool.include_paths)
+            #         self.doc_tool.add_comment(block)
 
             if node.spelling in self.symbols:
                 continue

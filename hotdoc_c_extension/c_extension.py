@@ -33,7 +33,7 @@ def get_clang_libdir():
     return subprocess.check_output(['llvm-config', '--libdir']).strip()
 
 class ClangScanner(object):
-    def __init__(self, doc_tool, clang_name=None, clang_path=None):
+    def __init__(self, doc_tool, doc_db, clang_name=None, clang_path=None):
         if not clang.cindex.Config.loaded:
             # Let's try and find clang ourselves first
             clang_libdir = get_clang_libdir()
@@ -48,6 +48,7 @@ class ClangScanner(object):
 
         self.__raw_comment_parser = GtkDocRawCommentParser(doc_tool)
         self.doc_tool = doc_tool
+        self.__doc_db = doc_db
 
     def scan(self, filenames, options, incremental, full_scan,
              full_scan_patterns, fail_fast=False):
@@ -72,7 +73,7 @@ class ClangScanner(object):
                         block = self.__raw_comment_parser.parse_comment(c[0],
                                 c[1], c[2], c[3], self.doc_tool.include_paths)
                         if block is not None:
-                            self.doc_tool.add_comment(block)
+                            self.doc_tool.doc_database.add_comment(block)
 
         for filename in self.filenames:
             if filename in self.parsed:
@@ -246,7 +247,7 @@ class ClangScanner(object):
         if not return_value:
             return_value = [ReturnItemSymbol(type_tokens=[], comment=None)]
 
-        sym = self.doc_tool.get_or_create_symbol(CallbackSymbol, parameters=parameters,
+        sym = self.__doc_db.get_or_create_symbol(CallbackSymbol, parameters=parameters,
                 return_value=return_value, comment=comment, display_name=node.spelling,
                 filename=str(node.location.file), lineno=node.location.line)
         return sym
@@ -356,7 +357,7 @@ class ClangScanner(object):
         if not public_fields:
             raw_text = None
 
-        return self.doc_tool.get_or_create_symbol(StructSymbol, raw_text=raw_text, members=members,
+        return self.__doc_db.get_or_create_symbol(StructSymbol, raw_text=raw_text, members=members,
                 comment=comment, display_name=node.spelling,
                 filename=str(decl.location.file), lineno=decl.location.line)
 
@@ -371,25 +372,25 @@ class ClangScanner(object):
                 member_comment = None
             member_value = member.enum_value
             # FIXME: this is pretty much a macro symbol ?
-            member = self.doc_tool.get_or_create_symbol(Symbol, comment=member_comment, display_name=member.spelling,
+            member = self.__doc_db.get_or_create_symbol(Symbol, comment=member_comment, display_name=member.spelling,
                     filename=str(member.location.file),
                     lineno=member.location.line)
             member.enum_value = member_value
             members.append (member)
 
-        return self.doc_tool.get_or_create_symbol(EnumSymbol, members=members, comment=comment, display_name=node.spelling,
+        return self.__doc_db.get_or_create_symbol(EnumSymbol, members=members, comment=comment, display_name=node.spelling,
                 filename=str(decl.location.file), lineno=decl.location.line)
 
     def __create_alias_symbol (self, node, comment):
         type_tokens = self.make_c_style_type_name(node.underlying_typedef_type)
         aliased_type = QualifiedSymbol (type_tokens=type_tokens)
-        return self.doc_tool.get_or_create_symbol(AliasSymbol, aliased_type=aliased_type, comment=comment,
+        return self.__doc_db.get_or_create_symbol(AliasSymbol, aliased_type=aliased_type, comment=comment,
                 display_name=node.spelling, filename=str(node.location.file),
                 lineno=node.location.line)
 
     def __create_typedef_symbol (self, node):
         t = node.underlying_typedef_type
-        comment = self.doc_tool.get_comment (node.spelling)
+        comment = self.doc_tool.doc_database.get_comment (node.spelling)
         if ast_node_is_function_pointer (t):
             sym = self.__create_callback_symbol (node, comment)
         else:
@@ -416,14 +417,14 @@ class ClangScanner(object):
                 parameter = ParameterSymbol (argname=param_name, comment = param_comment)
                 parameters.append (parameter)
 
-        sym = self.doc_tool.get_or_create_symbol(FunctionMacroSymbol, return_value=return_value,
+        sym = self.__doc_db.get_or_create_symbol(FunctionMacroSymbol, return_value=return_value,
                 parameters=parameters, original_text=original_text,
                 comment=comment, display_name=node.spelling,
                 filename=str(node.location.file), lineno=node.location.line)
         return sym
 
     def __create_constant_symbol (self, node, comment, original_text):
-        return self.doc_tool.get_or_create_symbol(ConstantSymbol, original_text=original_text, comment=comment,
+        return self.__doc_db.get_or_create_symbol(ConstantSymbol, original_text=original_text, comment=comment,
                 display_name=node.spelling, filename=str(node.location.file),
                 lineno=node.location.line)
 
@@ -442,7 +443,7 @@ class ClangScanner(object):
         original_lines = [linecache.getline(filename, i).rstrip() for i in range(start,
             end)]
         original_text = '\n'.join(original_lines)
-        comment = self.doc_tool.get_comment (node.spelling)
+        comment = self.doc_tool.doc_database.get_comment (node.spelling)
         if '(' in split[1]:
             sym = self.__create_function_macro_symbol (node, comment, original_text)
         else:
@@ -451,7 +452,7 @@ class ClangScanner(object):
         return sym
 
     def __create_function_symbol (self, node):
-        comment = self.doc_tool.get_comment (node.spelling)
+        comment = self.doc_tool.doc_database.get_comment (node.spelling)
         parameters = []
 
         if comment:
@@ -475,7 +476,7 @@ class ClangScanner(object):
                     type_tokens=type_tokens, comment=param_comment)
             parameters.append (parameter)
 
-        sym = self.doc_tool.get_or_create_symbol(FunctionSymbol, parameters=parameters,
+        sym = self.__doc_db.get_or_create_symbol(FunctionSymbol, parameters=parameters,
                 return_value=return_value, comment=comment, display_name=node.spelling,
                 filename=str(node.location.file), lineno=node.location.line,
                 extent_start=node.extent.start.line,
@@ -493,13 +494,13 @@ class ClangScanner(object):
         original_lines = [linecache.getline(filename, i).rstrip() for i in range(start,
             end)]
         original_text = '\n'.join(original_lines)
-        comment = self.doc_tool.get_comment (node.spelling)
+        comment = self.doc_tool.doc_database.get_comment (node.spelling)
 
         type_tokens = self.make_c_style_type_name(node.type)
         type_qs = QualifiedSymbol(type_tokens=type_tokens)
 
-        sym = self.doc_tool.get_or_create_symbol(ExportedVariableSymbol, original_text=original_text,
-                comment=self.doc_tool.get_comment (node.spelling),
+        sym = self.__doc_db.get_or_create_symbol(ExportedVariableSymbol, original_text=original_text,
+                comment=self.doc_tool.doc_database.get_comment (node.spelling),
                 display_name=node.spelling, filename=str(node.location.file),
                 lineno=node.location.line, type_qs=type_qs)
         return sym
@@ -657,16 +658,16 @@ class CExtension(BaseExtension):
 
         if not line_ranges:
             line_ranges = [(1, -1)]
-        symbol = self.doc_tool.get_symbol(symbol_name)
+        symbol = self.doc_tool.doc_database.get_symbol(symbol_name)
         if symbol and symbol.filename != include_path:
             symbol = None
 
         if not symbol:
-            scanner = ClangScanner(self.doc_tool, clang_name=self.clang_name,
+            scanner = ClangScanner(self.doc_tool, self, clang_name=self.clang_name,
                                    clang_path=self.clang_path)
             scanner.scan([include_path], self.flags,
                          self.doc_tool.incremental, True, ['*.c', '*.h'])
-            symbol = self.doc_tool.get_symbol(symbol_name)
+            symbol = self.doc_tool.doc_database.get_symbol(symbol_name)
 
             if not symbol:
                 print("Trying to include symbol %s but could not be found in "
@@ -693,7 +694,7 @@ class CExtension(BaseExtension):
 
     def setup(self):
         stale, unlisted = self.get_stale_files(self.sources)
-        self.scanner = ClangScanner(self.doc_tool, clang_name=self.clang_name,
+        self.scanner = ClangScanner(self.doc_tool, self, clang_name=self.clang_name,
                                     clang_path=self.clang_path)
         self.scanner.scan(stale, self.flags,
                           self.doc_tool.incremental, False, ['*.h'])
@@ -708,7 +709,7 @@ class CExtension(BaseExtension):
         flags = flags_from_config(wizard.config, wizard)
 
         print "scanning C sources"
-        scanner = ClangScanner(wizard, False,
+        scanner = ClangScanner(wizard, wizard, False,
                     ['*.h'])
 
         if not scanner.scan(sources, flags, False, fail_fast=True):

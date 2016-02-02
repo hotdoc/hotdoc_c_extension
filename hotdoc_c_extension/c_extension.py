@@ -9,8 +9,9 @@ from hotdoc.core.base_extension import BaseExtension
 from hotdoc.core.symbols import *
 from hotdoc.core.comment_block import comment_from_tag
 from hotdoc.core.links import Link
-from hotdoc.core.gi_raw_parser import GtkDocRawCommentParser
 from hotdoc.core.wizard import HotdocWizard
+
+from hotdoc.parsers.gtk_doc_parser import GtkDocParser
 
 from hotdoc.utils.wizard import Skip, QuickStartWizard
 
@@ -46,7 +47,7 @@ class ClangScanner(object):
             if clang_path:
                 clang.cindex.Config.set_library_path(clang_path)
 
-        self.__raw_comment_parser = GtkDocRawCommentParser(doc_tool)
+        self.__raw_comment_parser = GtkDocParser(doc_tool)
         self.doc_tool = doc_tool
         self.__doc_db = doc_db
 

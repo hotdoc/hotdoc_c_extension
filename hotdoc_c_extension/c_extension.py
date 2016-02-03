@@ -34,7 +34,7 @@ def get_clang_libdir():
     return subprocess.check_output(['llvm-config', '--libdir']).strip()
 
 class ClangScanner(object):
-    def __init__(self, doc_tool, doc_db, clang_name=None, clang_path=None):
+    def __init__(self, doc_repo, doc_db, clang_name=None, clang_path=None):
         if not clang.cindex.Config.loaded:
             # Let's try and find clang ourselves first
             clang_libdir = get_clang_libdir()
@@ -47,8 +47,8 @@ class ClangScanner(object):
             if clang_path:
                 clang.cindex.Config.set_library_path(clang_path)
 
-        self.__raw_comment_parser = GtkDocParser(doc_tool)
-        self.doc_tool = doc_tool
+        self.__raw_comment_parser = GtkDocParser(doc_repo)
+        self.doc_repo = doc_repo
         self.__doc_db = doc_db
 
     def scan(self, filenames, options, incremental, full_scan,
@@ -72,9 +72,9 @@ class ClangScanner(object):
                     cs = get_comments (filename)
                     for c in cs:
                         block = self.__raw_comment_parser.parse_comment(c[0],
-                                c[1], c[2], c[3], self.doc_tool.include_paths)
+                                c[1], c[2], c[3], self.doc_repo.include_paths)
                         if block is not None:
-                            self.doc_tool.doc_database.add_comment(block)
+                            self.doc_repo.doc_database.add_comment(block)
 
         for filename in self.filenames:
             if filename in self.parsed:
@@ -152,8 +152,8 @@ class ClangScanner(object):
             #             continue
             #         block = self.__raw_comment_parser.parse_comment (
             #             node.raw_comment, str(node.location.file), 0, 0,
-            #             self.doc_tool.include_paths)
-            #         self.doc_tool.add_comment(block)
+            #             self.doc_repo.include_paths)
+            #         self.doc_repo.add_comment(block)
 
             if node.spelling in self.symbols:
                 continue
@@ -391,7 +391,7 @@ class ClangScanner(object):
 
     def __create_typedef_symbol (self, node):
         t = node.underlying_typedef_type
-        comment = self.doc_tool.doc_database.get_comment (node.spelling)
+        comment = self.doc_repo.doc_database.get_comment (node.spelling)
         if ast_node_is_function_pointer (t):
             sym = self.__create_callback_symbol (node, comment)
         else:
@@ -444,7 +444,7 @@ class ClangScanner(object):
         original_lines = [linecache.getline(filename, i).rstrip() for i in range(start,
             end)]
         original_text = '\n'.join(original_lines)
-        comment = self.doc_tool.doc_database.get_comment (node.spelling)
+        comment = self.doc_repo.doc_database.get_comment (node.spelling)
         if '(' in split[1]:
             sym = self.__create_function_macro_symbol (node, comment, original_text)
         else:
@@ -453,7 +453,7 @@ class ClangScanner(object):
         return sym
 
     def __create_function_symbol (self, node):
-        comment = self.doc_tool.doc_database.get_comment (node.spelling)
+        comment = self.doc_repo.doc_database.get_comment (node.spelling)
         parameters = []
 
         if comment:
@@ -495,13 +495,13 @@ class ClangScanner(object):
         original_lines = [linecache.getline(filename, i).rstrip() for i in range(start,
             end)]
         original_text = '\n'.join(original_lines)
-        comment = self.doc_tool.doc_database.get_comment (node.spelling)
+        comment = self.doc_repo.doc_database.get_comment (node.spelling)
 
         type_tokens = self.make_c_style_type_name(node.type)
         type_qs = QualifiedSymbol(type_tokens=type_tokens)
 
         sym = self.__doc_db.get_or_create_symbol(ExportedVariableSymbol, original_text=original_text,
-                comment=self.doc_tool.doc_database.get_comment (node.spelling),
+                comment=self.doc_repo.doc_database.get_comment (node.spelling),
                 display_name=node.spelling, filename=str(node.location.file),
                 lineno=node.location.line, type_qs=type_qs)
         return sym
@@ -641,13 +641,13 @@ Parse C source files to extract comments and symbols.
 class CExtension(BaseExtension):
     EXTENSION_NAME = 'c-extension'
 
-    def __init__(self, doc_tool, config):
-        BaseExtension.__init__(self, doc_tool, config)
-        self.flags = flags_from_config(config, doc_tool)
-        sources = source_files_from_config(config, doc_tool)
+    def __init__(self, doc_repo, config):
+        BaseExtension.__init__(self, doc_repo, config)
+        self.flags = flags_from_config(config, doc_repo)
+        sources = source_files_from_config(config, doc_repo)
         self.clang_name = config.get('clang_name')
         self.clang_path = config.get('clang_path')
-        self.doc_tool = doc_tool
+        self.doc_repo = doc_repo
         self.sources = [os.path.abspath(filename) for filename in
                 sources]
         file_includer.include_signal.connect(self.__include_file_cb)
@@ -659,16 +659,16 @@ class CExtension(BaseExtension):
 
         if not line_ranges:
             line_ranges = [(1, -1)]
-        symbol = self.doc_tool.doc_database.get_symbol(symbol_name)
+        symbol = self.doc_repo.doc_database.get_symbol(symbol_name)
         if symbol and symbol.filename != include_path:
             symbol = None
 
         if not symbol:
-            scanner = ClangScanner(self.doc_tool, self, clang_name=self.clang_name,
+            scanner = ClangScanner(self.doc_repo, self, clang_name=self.clang_name,
                                    clang_path=self.clang_path)
             scanner.scan([include_path], self.flags,
-                         self.doc_tool.incremental, True, ['*.c', '*.h'])
-            symbol = self.doc_tool.doc_database.get_symbol(symbol_name)
+                         self.doc_repo.incremental, True, ['*.c', '*.h'])
+            symbol = self.doc_repo.doc_database.get_symbol(symbol_name)
 
             if not symbol:
                 print("Trying to include symbol %s but could not be found in "
@@ -695,10 +695,10 @@ class CExtension(BaseExtension):
 
     def setup(self):
         stale, unlisted = self.get_stale_files(self.sources)
-        self.scanner = ClangScanner(self.doc_tool, self, clang_name=self.clang_name,
+        self.scanner = ClangScanner(self.doc_repo, self, clang_name=self.clang_name,
                                     clang_path=self.clang_path)
         self.scanner.scan(stale, self.flags,
-                          self.doc_tool.incremental, False, ['*.h'])
+                          self.doc_repo.incremental, False, ['*.h'])
 
     @staticmethod
     def validate_c_extension(wizard):

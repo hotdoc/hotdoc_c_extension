@@ -710,10 +710,10 @@ class CExtension(BaseExtension):
         flags = flags_from_config(wizard.config, wizard)
 
         print "scanning C sources"
-        scanner = ClangScanner(wizard, wizard, False,
-                    ['*.h'])
+        wizard.include_paths = []
+        scanner = ClangScanner(wizard, wizard)
 
-        if not scanner.scan(sources, flags, False, fail_fast=True):
+        if not scanner.scan(sources, flags, False, False, ['*.h'], fail_fast=True):
             if not wizard.ask_confirmation("Scanning failed, try again [y,n]? "):
                 raise Skip
             return False

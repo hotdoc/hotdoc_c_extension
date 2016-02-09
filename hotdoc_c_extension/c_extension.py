@@ -675,7 +675,7 @@ class CExtension(BaseExtension):
                       "%s" % (symbol_name, include_path))
                 return None
 
-        res = "\n```c\n"
+        res = ''
         for n, (start, end) in enumerate(line_ranges):
             if n != 0:
                 res += "\n...\n"
@@ -689,9 +689,10 @@ class CExtension(BaseExtension):
             with open(include_path, "r") as _:
                 res += "\n".join(_.read().split("\n")[start:end])
 
-        res += "\n```"
+        if res:
+            return res, 'c'
 
-        return res
+        return None
 
     def setup(self):
         stale, unlisted = self.get_stale_files(self.sources)

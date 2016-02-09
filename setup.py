@@ -88,7 +88,7 @@ if clang_bindings_version == V('3.7'):
 
 setup(
     name = "hotdoc_c_extension",
-    version = "0.6.6",
+    version = "0.6.9",
     keywords = "C clang hotdoc",
     url='https://github.com/hotdoc/hotdoc_c_extension',
     author_email = 'mathieu.duponchelle@opencreed.com',

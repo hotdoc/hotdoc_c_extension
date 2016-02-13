@@ -34,18 +34,12 @@ def get_clang_libdir():
     return subprocess.check_output(['llvm-config', '--libdir']).strip()
 
 class ClangScanner(object):
-    def __init__(self, doc_repo, doc_db, clang_name=None, clang_path=None):
+    def __init__(self, doc_repo, doc_db):
         if not clang.cindex.Config.loaded:
             # Let's try and find clang ourselves first
             clang_libdir = get_clang_libdir()
             if os.path.exists(clang_libdir):
                 clang.cindex.Config.set_library_path(clang_libdir)
-
-            # But let's also let the user have its way
-            if clang_name:
-                clang.cindex.Config.set_library_file(clang_name)
-            if clang_path:
-                clang.cindex.Config.set_library_path(clang_path)
 
         self.__raw_comment_parser = GtkDocParser(doc_repo)
         self.doc_repo = doc_repo
@@ -640,16 +634,12 @@ Parse C source files to extract comments and symbols.
 
 class CExtension(BaseExtension):
     EXTENSION_NAME = 'c-extension'
+    flags = None
+    sources = None
 
-    def __init__(self, doc_repo, config):
-        BaseExtension.__init__(self, doc_repo, config)
-        self.flags = flags_from_config(config, doc_repo)
-        sources = source_files_from_config(config, doc_repo)
-        self.clang_name = config.get('clang_name')
-        self.clang_path = config.get('clang_path')
+    def __init__(self, doc_repo):
+        BaseExtension.__init__(self, doc_repo)
         self.doc_repo = doc_repo
-        self.sources = [os.path.abspath(filename) for filename in
-                sources]
         file_includer.include_signal.connect(self.__include_file_cb)
 
     # pylint: disable=no-self-use
@@ -664,9 +654,8 @@ class CExtension(BaseExtension):
             symbol = None
 
         if not symbol:
-            scanner = ClangScanner(self.doc_repo, self, clang_name=self.clang_name,
-                                   clang_path=self.clang_path)
-            scanner.scan([include_path], self.flags,
+            scanner = ClangScanner(self.doc_repo, self)
+            scanner.scan([include_path], CExtension.flags,
                          self.doc_repo.incremental, True, ['*.c', '*.h'])
             symbol = self.doc_repo.doc_database.get_symbol(symbol_name)
 
@@ -695,10 +684,9 @@ class CExtension(BaseExtension):
         return None
 
     def setup(self):
-        stale, unlisted = self.get_stale_files(self.sources)
-        self.scanner = ClangScanner(self.doc_repo, self, clang_name=self.clang_name,
-                                    clang_path=self.clang_path)
-        self.scanner.scan(stale, self.flags,
+        stale, unlisted = self.get_stale_files(CExtension.sources)
+        self.scanner = ClangScanner(self.doc_repo, self)
+        self.scanner.scan(stale, CExtension.flags,
                           self.doc_repo.incremental, False, ['*.h'])
 
     @staticmethod
@@ -741,6 +729,14 @@ class CExtension(BaseExtension):
         group.add_argument ("--extra-c-flags", action="store", nargs="+",
                 dest="extra_c_flags", help="Extra C flags (-D, -I)",
                 validate_function=QuickStartWizard.validate_list)
+
+    @staticmethod
+    def parse_config(doc_repo, config):
+        CExtension.flags = flags_from_config(config, doc_repo)
+        sources = source_files_from_config(config, doc_repo)
+        CExtension.sources = [os.path.abspath(filename) for filename in
+                sources]
+
 
 def get_extension_classes():
     return [CExtension]

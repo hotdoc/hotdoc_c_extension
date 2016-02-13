@@ -6,6 +6,7 @@ from fnmatch import fnmatch
 
 from hotdoc.core import file_includer
 from hotdoc.core.base_extension import BaseExtension
+from hotdoc.core.exceptions import ParsingException, BadInclusionException
 from hotdoc.core.symbols import *
 from hotdoc.core.comment_block import comment_from_tag
 from hotdoc.core.links import Link
@@ -13,6 +14,8 @@ from hotdoc.core.wizard import HotdocWizard
 
 from hotdoc.parsers.gtk_doc_parser import GtkDocParser
 
+from hotdoc.utils.loggable import (info as core_info, warn, Logger,
+    debug as core_debug)
 from hotdoc.utils.wizard import Skip, QuickStartWizard
 
 from .c_comment_scanner.c_comment_scanner import get_comments
@@ -23,6 +26,25 @@ def ast_node_is_function_pointer (ast_node):
             clang.cindex.TypeKind.INVALID:
         return True
     return False
+
+
+def info(message):
+    core_info(message, domain='c-extension')
+
+
+def debug(message):
+    core_debug(message, domain='c-extension')
+
+
+Logger.register_warning_code('clang-diagnostic', ParsingException,
+                             'c-extension')
+Logger.register_warning_code('clang-heisenbug', ParsingException,
+                             'c-extension')
+Logger.register_warning_code('clang-flags', ParsingException,
+                             'c-extension')
+Logger.register_warning_code('bad-c-inclusion', BadInclusionException,
+                             'c-extension')
+
 
 def get_clang_headers():
     version = subprocess.check_output(['llvm-config', '--version']).strip()
@@ -51,6 +73,7 @@ class ClangScanner(object):
         flags = clang.cindex.TranslationUnit.PARSE_INCOMPLETE |\
                 clang.cindex.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD
 
+        info('scanning %d C source files' % len(filenames))
         self.filenames = filenames
 
         # FIXME: er maybe don't do that ?
@@ -60,9 +83,12 @@ class ClangScanner(object):
         self.symbols = {}
         self.parsed = set({})
 
+        debug('CFLAGS %s' % ' '.join(args))
+
         if not full_scan:
             for filename in filenames:
                 with open (filename, 'r') as f:
+                    debug('Getting comments in %s' % filename)
                     cs = get_comments (filename)
                     for c in cs:
                         block = self.__raw_comment_parser.parse_comment(c[0],
@@ -76,19 +102,16 @@ class ClangScanner(object):
 
             do_full_scan = any(fnmatch(filename, p) for p in full_scan_patterns)
             if do_full_scan:
+                debug('scanning %s' % filename)
                 tu = index.parse(filename, args=args, options=flags)
 
                 for diag in tu.diagnostics:
-                    print "Clang issue : %s" % str(diag)
-
-                if tu.diagnostics:
-                    return False
+                    warn('clang-diagnostic', 'Clang issue : %s' % str(diag))
 
                 self.__parse_file (filename, tu, full_scan)
                 for include in tu.get_includes():
                     self.__parse_file (os.path.abspath(str(include.include)),
                                        tu, full_scan)
-
         return True
 
     def __parse_file (self, filename, tu, full_scan):
@@ -428,8 +451,9 @@ class ClangScanner(object):
         split = l.split()
 
         if len (split) < 2:
-            print "Found a strange #define, please report this:"
-            print l, str(node.location.file), node.location.line
+            warn("clang-heisenbug",
+                    "Found a strange #define, please report the following:\n" +
+                 l + str(node.location))
             return None
 
         start = node.extent.start.line
@@ -563,12 +587,12 @@ def validate_pkg_config_packages(wizard, packages):
         return True
 
     if type(packages) != list:
-        print "Incorrect type, expected list or None"
+        warn('clang-flags', "Incorrect type, expected list or None")
         return False
 
     for package in packages:
         if not pkgconfig.exists(package):
-            print "package %s does not exist" % package
+            warn('clang-flags', 'package %s does not exist' % package)
             return False
 
     return True
@@ -660,8 +684,9 @@ class CExtension(BaseExtension):
             symbol = self.doc_repo.doc_database.get_symbol(symbol_name)
 
             if not symbol:
-                print("Trying to include symbol %s but could not be found in "
-                      "%s" % (symbol_name, include_path))
+                warn('bad-c-inclusion',
+                     "Trying to include symbol %s but could not be found in "
+                     "%s" % (symbol_name, include_path))
                 return None
 
         res = ''

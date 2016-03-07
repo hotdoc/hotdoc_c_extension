@@ -104,9 +104,12 @@ except ValueError as e:
 if clang_bindings_version == V('3.7'):
     clang_bindings_version = V('3.7.dev234765')
 
+with open(os.path.join('hotdoc_c_extension', 'VERSION.txt'), 'r') as _:
+    VERSION = _.read().strip()
+
 setup(
     name = "hotdoc_c_extension",
-    version = "0.7",
+    version = VERSION,
     keywords = "C clang hotdoc",
     url='https://github.com/hotdoc/hotdoc_c_extension',
     author_email = 'mathieu.duponchelle@opencreed.com',
@@ -118,6 +121,7 @@ setup(
         'hotdoc_c_extension.c_comment_scanner': ['scannermodule.c',
                                                  'scanner.h',
                                                  'scanner.l'],
+        'hotdoc_c_extension': ['VERSION.txt'],
     },
     entry_points = {'hotdoc.extensions': 'get_extension_classes = hotdoc_c_extension.c_extension:get_extension_classes'},
     cmdclass = {'build_ext': build_ext},

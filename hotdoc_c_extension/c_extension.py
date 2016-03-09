@@ -132,6 +132,9 @@ class ClangScanner(object):
                                        tu, full_scan)
         return True
 
+    def set_extension(self, extension):
+        self.__doc_db = extension
+
     def __parse_file (self, filename, tu, full_scan):
         if filename in self.parsed:
             return
@@ -683,6 +686,7 @@ class CExtension(BaseExtension):
         BaseExtension.__init__(self, doc_repo)
         self.doc_repo = doc_repo
         file_includer.include_signal.connect(self.__include_file_cb)
+        self.scanner = ClangScanner(self.doc_repo, self)
 
     # pylint: disable=no-self-use
     def __include_file_cb(self, include_path, line_ranges, symbol_name):
@@ -728,7 +732,6 @@ class CExtension(BaseExtension):
 
     def setup(self):
         stale, unlisted = self.get_stale_files(CExtension.sources)
-        self.scanner = ClangScanner(self.doc_repo, self)
         self.scanner.scan(stale, CExtension.flags,
                           self.doc_repo.incremental, False, ['*.h'])
 

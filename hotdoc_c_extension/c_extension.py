@@ -120,7 +120,6 @@ class ClangScanner(object):
 
             do_full_scan = any(fnmatch(filename, p) for p in full_scan_patterns)
             if do_full_scan:
-                debug('scanning %s' % filename)
                 tu = index.parse(filename, args=args, options=flags)
 
                 for diag in tu.diagnostics:
@@ -128,8 +127,8 @@ class ClangScanner(object):
 
                 self.__parse_file (filename, tu, full_scan)
                 for include in tu.get_includes():
-                    self.__parse_file (os.path.abspath(str(include.include)),
-                                       tu, full_scan)
+                    fname = os.path.abspath(str(include.include))
+                    self.__parse_file (fname, tu, full_scan)
         return True
 
     def set_extension(self, extension):
@@ -140,6 +139,12 @@ class ClangScanner(object):
             return
 
         self.parsed.add (filename)
+
+        if filename not in self.filenames:
+            return
+
+        debug('scanning %s' % filename)
+
         start = tu.get_location (filename, 0)
         end = tu.get_location (filename, int(os.path.getsize(filename)))
         extent = clang.cindex.SourceRange.from_locations (start, end)
@@ -434,6 +439,10 @@ class ClangScanner(object):
             sym = self.__create_callback_symbol (node, comment)
         else:
             d = t.get_declaration()
+
+            if d.location.file and unicode(d.location.file) not in self.filenames:
+                return
+
             if d.kind == clang.cindex.CursorKind.STRUCT_DECL:
                 sym = self.__create_struct_symbol (node, comment)
             elif d.kind == clang.cindex.CursorKind.ENUM_DECL:

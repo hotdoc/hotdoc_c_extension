@@ -88,8 +88,7 @@ class ClangScanner(object):
     def scan(self, filenames, options, incremental, full_scan,
              full_scan_patterns, fail_fast=False):
         index = clang.cindex.Index.create()
-        flags = clang.cindex.TranslationUnit.PARSE_INCOMPLETE |\
-                clang.cindex.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD
+        flags = clang.cindex.TranslationUnit.PARSE_INCOMPLETE
 
         info('scanning %d C source files' % len(filenames))
         self.filenames = filenames
@@ -109,10 +108,13 @@ class ClangScanner(object):
                     debug('Getting comments in %s' % filename)
                     cs = get_comments (filename)
                     for c in cs:
-                        block = self.__raw_comment_parser.parse_comment(c[0],
+                        if c[4]:
+                            block = self.__raw_comment_parser.parse_comment(c[0],
                                 c[1], c[2], c[3], self.doc_repo.include_paths)
-                        if block is not None:
-                            self.doc_repo.doc_database.add_comment(block)
+                            if block is not None:
+                                self.doc_repo.doc_database.add_comment(block)
+                        else:
+                            self.__create_macro_from_raw_text(c)
 
         for filename in self.filenames:
             if filename in self.parsed:
@@ -207,8 +209,6 @@ class ClangScanner(object):
                 sym = self.__create_function_symbol(func_dec)
             elif node.kind == clang.cindex.CursorKind.VAR_DECL:
                 sym = self.__create_exported_variable_symbol (node)
-            elif node.kind == clang.cindex.CursorKind.MACRO_DEFINITION:
-                sym = self.__create_macro_symbol (node)
             elif node.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
                 sym = self.__create_typedef_symbol (node)
 
@@ -451,7 +451,26 @@ class ClangScanner(object):
                 sym = self.__create_alias_symbol (node, comment)
         return sym
 
-    def __create_function_macro_symbol (self, node, comment, original_text):
+    def __create_macro_from_raw_text(self, raw):
+        mcontent = raw[0].replace('\t', ' ')
+        mcontent = mcontent.split(' ', 1)[1]
+        split = mcontent.split('(', 1)
+        name = split[0]
+        if not (' ' in name or '\t' in name) and len(split) == 2:
+            args = split[1].split(')', 1)[0].split(',')
+            if args:
+                stripped_name = name.strip()
+                comment = self.doc_repo.doc_database.get_comment(stripped_name)
+                return self.__create_function_macro_symbol(stripped_name,
+                    raw[1], raw[2], comment, raw[0])
+
+        name = mcontent.split(' ', 1)[0]
+        stripped_name = name.strip()
+        comment = self.doc_repo.doc_database.get_comment(stripped_name)
+        return self.__create_constant_symbol(stripped_name, raw[1], raw[2],
+            comment, raw[0])
+
+    def __create_function_macro_symbol (self, name, filename, lineno, comment, original_text):
         return_value = [None]
         if comment:
             return_tag = comment.tags.get ('returns')
@@ -462,43 +481,20 @@ class ClangScanner(object):
         parameters = []
         if comment:
             for param_name, param_comment in comment.params.iteritems():
-                parameter = ParameterSymbol (argname=param_name, comment = param_comment)
+                parameter = ParameterSymbol (argname=param_name, comment=param_comment)
                 parameters.append (parameter)
 
         sym = self.__doc_db.get_or_create_symbol(FunctionMacroSymbol, return_value=return_value,
                 parameters=parameters, original_text=original_text,
-                comment=comment, display_name=node.spelling,
-                filename=str(node.location.file), lineno=node.location.line)
+                comment=comment, display_name=name,
+                filename=filename, lineno=lineno)
         return sym
 
-    def __create_constant_symbol (self, node, comment, original_text):
-        return self.__doc_db.get_or_create_symbol(ConstantSymbol, original_text=original_text, comment=comment,
-                display_name=node.spelling, filename=str(node.location.file),
-                lineno=node.location.line)
-
-    def __create_macro_symbol (self, node):
-        l = linecache.getline (str(node.location.file), node.location.line)
-        split = l.split()
-
-        if len (split) < 2:
-            warn("clang-heisenbug",
-                    "Found a strange #define, please report the following:\n" +
-                 l + str(node.location))
-            return None
-
-        start = node.extent.start.line
-        end = node.extent.end.line + 1
-        filename = str(node.location.file)
-        original_lines = [linecache.getline(filename, i).rstrip() for i in range(start,
-            end)]
-        original_text = '\n'.join(original_lines)
-        comment = self.doc_repo.doc_database.get_comment (node.spelling)
-        if '(' in split[1]:
-            sym = self.__create_function_macro_symbol (node, comment, original_text)
-        else:
-            sym = self.__create_constant_symbol (node, comment, original_text)
-
-        return sym
+    def __create_constant_symbol (self, name, filename, lineno, comment, original_text):
+        return self.__doc_db.get_or_create_symbol(ConstantSymbol,
+                original_text=original_text, comment=comment,
+                display_name=name, filename=filename,
+                lineno=lineno)
 
     def __create_function_symbol (self, node):
         comment = self.doc_repo.doc_database.get_comment (node.spelling)

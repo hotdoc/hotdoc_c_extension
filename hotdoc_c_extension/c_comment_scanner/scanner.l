@@ -35,14 +35,19 @@ extern int yylex (PyObject *comments, const char *filename);
 #define YY_DECL int yylex (PyObject *comments, const char *filename)
 static int yywrap (void);
 static void parse_comment ();
+static void parse_define ();
 %}
 
 %option nounput
 %option yylineno
 
+HASH    #
+SPACE   [ \t]
+
 %%
 
-"/*"              { parse_comment (comments, filename); }
+"/*"                            { parse_comment (comments, filename); }
+{HASH}{SPACE}*"define"{SPACE}*  { parse_define (comments, filename); }
 
 .|\n		  { }
 
@@ -70,6 +75,49 @@ realloc_and_concat(char *str, char *s2)
 }
 
 #define BUFSIZE 1024
+
+static void
+parse_define (PyObject *comments, const char *filename)
+{
+  int c = input();
+  int include_next_line = 0;
+  char *define = strdup("#define ");
+  char buf[BUFSIZE];
+  int cursor = 0;
+  int define_lineno = yylineno - 1;
+
+  while (c != EOF) {
+    buf[cursor++] = c;
+
+    if (cursor >= BUFSIZE - 1) {
+      buf[cursor] = 0;
+      define = realloc_and_concat (define, buf);
+      cursor = 0;
+    }
+
+    c = input();
+    if (c == '\\') {
+      include_next_line = !include_next_line;
+    } else if (c == '\n') {
+      if (!include_next_line)
+        break;
+      include_next_line = 0;
+    } else if (c != ' ' && c != '\t') {
+      include_next_line = 0;
+    }
+  }
+
+  buf[cursor] = 0;
+  define = realloc_and_concat (define, buf);
+
+  PyObject *item = Py_BuildValue ("(ssiii)",
+        define,
+        strdup(filename), /* Sic .. */
+        define_lineno,
+        yylineno,
+        0);
+  PyList_Append (comments, item);
+}
 
 static void
 parse_comment (PyObject *comments, const char *filename)
@@ -108,10 +156,11 @@ parse_comment (PyObject *comments, const char *filename)
     comment = realloc_and_concat (comment, buf);
     comment = realloc_and_concat (comment, "*/");
 
-    PyObject *item = Py_BuildValue ("(ssii)", comment,
+    PyObject *item = Py_BuildValue ("(ssiii)", comment,
         strdup(filename), /* Sic .. */
         comment_lineno,
-        yylineno);
+        yylineno,
+        1);
     PyList_Append (comments, item);
   } else {
     while (c2 != EOF && !(c1 == '*' && c2 == '/'))

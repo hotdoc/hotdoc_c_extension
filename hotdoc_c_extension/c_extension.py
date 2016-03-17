@@ -28,13 +28,11 @@ from hotdoc.core.exceptions import ParsingException, BadInclusionException
 from hotdoc.core.symbols import *
 from hotdoc.core.comment_block import comment_from_tag
 from hotdoc.core.links import Link
-from hotdoc.core.wizard import HotdocWizard
 
 from hotdoc.parsers.gtk_doc_parser import GtkDocParser
 
 from hotdoc.utils.loggable import (info as core_info, warn, Logger,
     debug as core_debug)
-from hotdoc.utils.wizard import Skip, QuickStartWizard
 
 from .c_comment_scanner.c_comment_scanner import get_comments
 
@@ -550,85 +548,6 @@ class ClangScanner(object):
                 lineno=node.location.line, type_qs=type_qs)
         return sym
 
-PKG_PROMPT=\
-"""
-The C extension uses clang to parse the source code
-of your project, and discover the symbols exposed.
-
-It thus needs to be provided with the set of flags
-used to compile the library.
-
-In this stage of the configuration, you will first be
-prompted for the package names the library depends
-upon, as you would pass them to pkg-config, for
-example if the library depends on the glib, the call
-to pkg-config would be:
-
-$ pkg-config glib-2.0 --cflags
-
-so you would want to return:
-
->>> ['glib-2.0']
-
-here.
-
-You will then be prompted for any additional flags needed
-for the compilation, for example:
-
->>> ["-Dfoo=bar"]
-
-After the flags have been confirmed, the extension will
-try to compile your library. If clang can't compile
-without warnings, compilation will stop, the batch
-of warnings will be displayed, and you'll be given the chance
-to correct the flags you passed.
-"""
-
-C_SOURCES_PROMPT=\
-"""
-Please pass a list of c source files (headers and implementation).
-
-You can pass wildcards here, for example:
-
->>> ['../foo/*.c', '../foo/*.h']
-
-These wildcards will be evaluated each time hotdoc is run.
-
-You will be prompted for source files to ignore afterwards.
-"""
-
-C_FILTERS_PROMPT=\
-"""
-Please pass a list of c source files to ignore.
-
-You can pass wildcards here, for example:
-
->>> ['../foo/*priv*']
-
-These wildcards will be evaluated each time hotdoc is run.
-"""
-
-def validate_pkg_config_packages(wizard, packages):
-    if packages is None:
-        return True
-
-    if type(packages) != list:
-        warn('clang-flags', "Incorrect type, expected list or None")
-        return False
-
-    for package in packages:
-        if not pkgconfig.exists(package):
-            warn('clang-flags', 'package %s does not exist' % package)
-            return False
-
-    return True
-
-def source_files_from_config(config, conf_path_resolver):
-    sources = resolve_patterns(config.get('c_sources', []), conf_path_resolver)
-    filters = resolve_patterns(config.get('c_source_filters', []),
-            conf_path_resolver)
-    sources = [item for item in sources if item not in filters]
-    return [os.path.abspath(source) for source in sources]
 
 def flags_from_config(config, path_resolver):
     flags = []
@@ -636,45 +555,9 @@ def flags_from_config(config, path_resolver):
     for package in config.get('pkg_config_packages') or []:
         flags.extend(pkgconfig.cflags(package).split(' '))
 
-    extra_flags = config.get('extra_c_flags') or []
-
-    for extra_flag in extra_flags:
-        extra_flag = extra_flag.strip()
-        if extra_flag.startswith('-I'):
-            path = extra_flag.split('-I')[1]
-            flags.append('-I%s' % path_resolver.resolve_config_path(path))
-        else:
-            flags.append(extra_flag)
+    flags += config.get('extra_c_flags') or []
 
     return flags
-
-def resolve_patterns(source_patterns, conf_path_resolver):
-    if source_patterns is None:
-        return []
-
-    source_files = []
-    for item in source_patterns:
-        item = conf_path_resolver.resolve_config_path(item)
-        source_files.extend(glob.glob(item))
-
-    return source_files
-
-def validate_filters(wizard, thing):
-    if thing is None:
-        return True
-
-    if not QuickStartWizard.validate_globs_list(wizard, thing):
-        return False
-
-    source_files = resolve_patterns(wizard.config.get('c_sources', []), wizard)
-
-    filters = resolve_patterns(thing, wizard)
-
-    source_files = [item for item in source_files if item not in filters]
-
-    print "The files to be parsed would now be %s" % source_files
-
-    return wizard.ask_confirmation()
 
 DESCRIPTION =\
 """
@@ -686,7 +569,6 @@ class CExtension(BaseExtension):
     EXTENSION_NAME = 'c-extension'
     argument_prefix = 'c'
     flags = None
-    sources = None
 
     def __init__(self, doc_repo):
         BaseExtension.__init__(self, doc_repo)
@@ -742,41 +624,22 @@ class CExtension(BaseExtension):
                           self.doc_repo.incremental, False, ['*.h'])
 
     @staticmethod
-    def validate_c_extension(wizard):
-        sources = source_files_from_config(wizard.config, wizard)
-
-        if not sources:
-            return
-
-        flags = flags_from_config(wizard.config, wizard)
-
-        print "scanning C sources"
-        wizard.include_paths = []
-        scanner = ClangScanner(wizard, wizard)
-
-        if not scanner.scan(sources, flags, False, False, ['*.h'], fail_fast=True):
-            if not wizard.ask_confirmation("Scanning failed, try again [y,n]? "):
-                raise Skip
-            return False
-        return True
-
-    @staticmethod
     def add_arguments (parser):
-        group = parser.add_argument_group('C extension', DESCRIPTION,
-                validate_function=CExtension.validate_c_extension)
+        group = parser.add_argument_group('C extension', DESCRIPTION)
         CExtension.add_sources_argument(group)
+        CExtension.add_paths_argument(group, "include-directories",
+                help_="List extra include directories here")
         group.add_argument ("--pkg-config-packages", action="store", nargs="+",
-                dest="pkg_config_packages", help="Packages the library depends upon",
-                extra_prompt=PKG_PROMPT,
-                validate_function=validate_pkg_config_packages)
+                dest="pkg_config_packages", help="Packages the library depends upon")
         group.add_argument ("--extra-c-flags", action="store", nargs="+",
-                dest="extra_c_flags", help="Extra C flags (-D, -I)",
-                validate_function=QuickStartWizard.validate_list)
+                dest="extra_c_flags", help="Extra C flags (-D, -U, ..)")
 
     @staticmethod
     def parse_config(doc_repo, config):
-        CExtension.flags = flags_from_config(config, doc_repo)
         CExtension.parse_standard_config(config)
+        CExtension.flags = flags_from_config(config, doc_repo)
+        for dir_ in CExtension.include_directories:
+            CExtension.flags.append('-I%s' % dir_)
 
 
 def get_extension_classes():

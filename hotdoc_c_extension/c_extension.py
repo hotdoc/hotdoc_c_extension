@@ -684,6 +684,7 @@ Parse C source files to extract comments and symbols.
 
 class CExtension(BaseExtension):
     EXTENSION_NAME = 'c-extension'
+    argument_prefix = 'c'
     flags = None
     sources = None
 
@@ -763,16 +764,7 @@ class CExtension(BaseExtension):
     def add_arguments (parser):
         group = parser.add_argument_group('C extension', DESCRIPTION,
                 validate_function=CExtension.validate_c_extension)
-        group.add_argument ("--c-sources", action="store", nargs="+",
-                dest="c_sources", help="C source files to parse",
-                extra_prompt=C_SOURCES_PROMPT,
-                validate_function=QuickStartWizard.validate_globs_list,
-                finalize_function=HotdocWizard.finalize_paths)
-        group.add_argument ("--c-source-filters", action="store", nargs="+",
-                dest="c_source_filters", help="C source files to ignore",
-                extra_prompt=C_FILTERS_PROMPT,
-                validate_function=validate_filters,
-                finalize_function=HotdocWizard.finalize_paths)
+        CExtension.add_sources_argument(group)
         group.add_argument ("--pkg-config-packages", action="store", nargs="+",
                 dest="pkg_config_packages", help="Packages the library depends upon",
                 extra_prompt=PKG_PROMPT,
@@ -784,9 +776,7 @@ class CExtension(BaseExtension):
     @staticmethod
     def parse_config(doc_repo, config):
         CExtension.flags = flags_from_config(config, doc_repo)
-        sources = source_files_from_config(config, doc_repo)
-        CExtension.sources = [os.path.abspath(filename) for filename in
-                sources]
+        CExtension.parse_standard_config(config)
 
 
 def get_extension_classes():

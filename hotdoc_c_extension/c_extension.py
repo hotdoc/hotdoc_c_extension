@@ -618,6 +618,13 @@ class CExtension(BaseExtension):
 
         return None
 
+    def _get_languages(self):
+        return ['c']
+
+    def get_or_create_symbol(self, *args, **kwargs):
+        kwargs['language'] = 'c'
+        return super(CExtension, self).get_or_create_symbol(*args, **kwargs)
+
     def setup(self):
         stale, unlisted = self.get_stale_files(CExtension.sources)
         self.scanner.scan(stale, CExtension.flags,

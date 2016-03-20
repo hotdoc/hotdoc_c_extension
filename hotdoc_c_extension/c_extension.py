@@ -149,6 +149,11 @@ class ClangScanner(object):
         end = tu.get_location (filename, int(os.path.getsize(filename)))
         extent = clang.cindex.SourceRange.from_locations (start, end)
         cursors = self.__get_cursors(tu, extent)
+
+        # Happens with empty source files
+        if cursors is None:
+            return
+
         if filename in self.filenames:
             self.__create_symbols (cursors, tu, full_scan)
 

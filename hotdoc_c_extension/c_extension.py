@@ -387,6 +387,7 @@ class ClangScanner(object):
         underlying = node.underlying_typedef_type
         decl = underlying.get_declaration()
         raw_text, public_fields = self.__parse_public_fields (decl)
+        raw_text = unicode(raw_text.decode('utf8'))
         members = []
         for field in public_fields:
             if comment:

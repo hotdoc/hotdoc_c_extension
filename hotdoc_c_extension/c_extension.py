@@ -572,7 +572,7 @@ Parse C source files to extract comments and symbols.
 
 
 class CExtension(BaseExtension):
-    EXTENSION_NAME = 'c-extension'
+    extension_name = 'c-extension'
     argument_prefix = 'c'
     flags = None
 

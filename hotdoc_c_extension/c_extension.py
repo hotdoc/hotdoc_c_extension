@@ -208,7 +208,7 @@ class ClangScanner(object):
 
             sym = None
             func_dec = self.__getFunctionDeclNode(node)
-            if func_dec:
+            if func_dec and func_dec.spelling not in self.symbols:
                 sym = self.__create_function_symbol(func_dec)
             elif node.kind == clang.cindex.CursorKind.VAR_DECL:
                 sym = self.__create_exported_variable_symbol (node)
@@ -216,7 +216,7 @@ class ClangScanner(object):
                 sym = self.__create_typedef_symbol (node)
 
             if sym is not None:
-                self.symbols[node.spelling] = sym
+                self.symbols[sym.unique_name] = sym
 
     def __getFunctionDeclNode(self, node):
         if not node.location.file:

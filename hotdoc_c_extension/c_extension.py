@@ -561,7 +561,9 @@ def flags_from_config(config, path_resolver):
     for package in config.get('pkg_config_packages') or []:
         flags.extend(pkgconfig.cflags(package).split(' '))
 
-    flags += config.get('extra_c_flags') or []
+    extra_flags = config.get('extra_c_flags') or []
+    for flag in extra_flags:
+        flags.extend([f for f in flag.split()])
 
     return flags
 

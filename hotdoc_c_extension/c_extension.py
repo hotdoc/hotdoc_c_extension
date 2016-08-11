@@ -24,7 +24,7 @@ from fnmatch import fnmatch
 
 from hotdoc.core import file_includer
 from hotdoc.core.base_extension import BaseExtension
-from hotdoc.core.exceptions import ParsingException, BadInclusionException
+from hotdoc.core.exceptions import ParsingException, BadInclusionException, HotdocException
 from hotdoc.core.symbols import *
 from hotdoc.core.comment_block import comment_from_tag
 from hotdoc.core.links import Link
@@ -60,13 +60,25 @@ Logger.register_warning_code('clang-flags', ParsingException,
                              'c-extension')
 Logger.register_warning_code('bad-c-inclusion', BadInclusionException,
                              'c-extension')
+Logger.register_warning_code('clang-headers-not-found', HotdocException,
+                             'c-extension')
+
+
+CLANG_HEADERS_WARNING = (
+'Did not find clang headers. Please report a bug with the output of the'
+'\'llvm-config --version\' and \'llvm-config --prefix\' commands')
 
 
 def get_clang_headers():
     version = subprocess.check_output(['llvm-config', '--version']).strip()
     prefix = subprocess.check_output(['llvm-config', '--prefix']).strip()
 
-    return os.path.join(prefix, 'lib', 'clang', version, 'include')
+    for lib in ['lib', 'lib64']:
+        p = os.path.join(prefix, lib, 'clang', version, 'include')
+        if os.path.exists(p):
+            return p
+
+    warn('clang-headers-not-found', CLANG_HEADERS_WARNING)
 
 def get_clang_libdir():
     return subprocess.check_output(['llvm-config', '--libdir']).strip()

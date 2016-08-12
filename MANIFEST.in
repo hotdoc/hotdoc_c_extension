@@ -1,0 +1,2 @@
+include hotdoc_c_extension/c_comment_scanner/scanner.l
+include hotdoc_c_extension/c_comment_scanner/scanner.h

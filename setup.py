@@ -118,9 +118,6 @@ setup(
     author = "Mathieu Duponchelle",
     packages = find_packages(),
     package_data = {
-        'hotdoc_c_extension.c_comment_scanner': ['scannermodule.c',
-                                                 'scanner.h',
-                                                 'scanner.l'],
         'hotdoc_c_extension': ['VERSION.txt'],
     },
     entry_points = {'hotdoc.extensions': 'get_extension_classes = hotdoc_c_extension.c_extension:get_extension_classes'},

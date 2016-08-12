@@ -26,7 +26,7 @@ from distutils.dep_util import newer_group
 from distutils.spawn import spawn
 from distutils.command.build_ext import build_ext as _build_ext
 
-from utils.setup_utils import VersionList
+from hotdoc_c_extension.utils.setup_utils import VersionList
 
 source_dir = os.path.abspath('./')
 def src(filename):

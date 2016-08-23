@@ -456,9 +456,6 @@ class ClangScanner(object):
         else:
             d = t.get_declaration()
 
-            if d.location.file and unicode(d.location.file) not in self.filenames:
-                return
-
             if d.kind == clang.cindex.CursorKind.STRUCT_DECL:
                 sym = self.__create_struct_symbol (node, comment)
             elif d.kind == clang.cindex.CursorKind.ENUM_DECL:

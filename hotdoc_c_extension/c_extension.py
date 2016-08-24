@@ -98,7 +98,7 @@ class ClangScanner(object):
     def scan(self, filenames, options, incremental, full_scan,
              full_scan_patterns, fail_fast=False):
         index = clang.cindex.Index.create()
-        flags = clang.cindex.TranslationUnit.PARSE_INCOMPLETE
+        flags = clang.cindex.TranslationUnit.PARSE_INCOMPLETE | clang.cindex.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD
 
         info('scanning %d C source files' % len(filenames))
         self.filenames = filenames
@@ -167,7 +167,7 @@ class ClangScanner(object):
             return
 
         if filename in self.filenames:
-            self.__create_symbols (cursors, tu, full_scan)
+            self.__create_symbols (cursors, tu)
 
     # That's the fastest way of obtaining our ast nodes for a given filename
     def __get_cursors (self, tu, extent):
@@ -188,7 +188,7 @@ class ClangScanner(object):
 
         return cursors
 
-    def __create_symbols(self, nodes, tu, full_scan):
+    def __create_symbols(self, nodes, tu):
         for node in nodes:
             node._tu = tu
 
@@ -202,18 +202,6 @@ class ClangScanner(object):
 
                 if not unicode(node.location.file) in self.filenames:
                     continue
-
-            # if node.kind in [clang.cindex.CursorKind.FUNCTION_DECL,
-            #                 clang.cindex.CursorKind.TYPEDEF_DECL,
-            #                 clang.cindex.CursorKind.MACRO_DEFINITION,
-            #                 clang.cindex.CursorKind.VAR_DECL]:
-            #     if full_scan:
-            #         if not node.raw_comment:
-            #             continue
-            #         block = self.__raw_comment_parser.parse_comment (
-            #             node.raw_comment, str(node.location.file), 0, 0,
-            #             self.doc_repo.include_paths)
-            #         self.doc_repo.add_comment(block)
 
             if node.spelling in self.symbols:
                 continue
@@ -229,6 +217,7 @@ class ClangScanner(object):
 
             if sym is not None:
                 self.symbols[sym.unique_name] = sym
+            self.__create_symbols(node.get_children(), tu)
 
     def __getFunctionDeclNode(self, node):
         if not node.location.file:

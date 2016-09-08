@@ -437,8 +437,14 @@ class ClangScanner(object):
 
         anonymous = not node.spelling
 
+        start = node.extent.start.line
+        end = node.extent.end.line + 1
+        original_lines = [linecache.getline(str(node.location.file), i).rstrip() for i in range(start,
+            end)]
+        raw_text = '\n'.join(original_lines)
+
         return self.__doc_db.get_or_create_symbol(EnumSymbol, members=members,
-                anonymous=anonymous, comment=comment, display_name=spelling,
+                anonymous=anonymous, raw_text=raw_text, comment=comment, display_name=spelling,
                 filename=str(node.location.file), lineno=node.location.line)
 
     def __create_alias_symbol (self, node, comment):

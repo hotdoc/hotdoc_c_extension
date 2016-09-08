@@ -35,6 +35,7 @@ from hotdoc.utils.loggable import (info as core_info, warn, Logger,
     debug as core_debug)
 
 from .c_comment_scanner.c_comment_scanner import get_comments
+from .c_html_formatter import CHtmlFormatter
 
 def ast_node_is_function_pointer (ast_node):
     if ast_node.kind == clang.cindex.TypeKind.POINTER and \
@@ -214,6 +215,12 @@ class ClangScanner(object):
                 sym = self.__create_exported_variable_symbol (node)
             elif node.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
                 sym = self.__create_typedef_symbol (node)
+            elif node.kind == clang.cindex.CursorKind.STRUCT_DECL and node.spelling:
+                comment = self.doc_repo.doc_database.get_comment (node.spelling)
+                sym = self.__create_struct_symbol(node, comment)
+            elif node.kind == clang.cindex.CursorKind.ENUM_DECL and node.spelling:
+                comment = self.doc_repo.doc_database.get_comment (node.spelling)
+                sym = self.__create_enum_symbol(node, comment)
 
             if sym is not None:
                 self.symbols[sym.unique_name] = sym
@@ -384,10 +391,9 @@ class ClangScanner(object):
                     delimiters.append((False, tok.location.line))
         return had_public
 
-    def __create_struct_symbol (self, node, comment):
-        underlying = node.underlying_typedef_type
-        decl = underlying.get_declaration()
-        raw_text, public_fields = self.__parse_public_fields (decl)
+    def __create_struct_symbol (self, node, comment, spelling=None):
+        spelling = spelling or node.spelling
+        raw_text, public_fields = self.__parse_public_fields (node)
         raw_text = unicode(raw_text.decode('utf8'))
         members = []
         for field in public_fields:
@@ -406,15 +412,17 @@ class ClangScanner(object):
         if not public_fields:
             raw_text = None
 
-        return self.__doc_db.get_or_create_symbol(StructSymbol, raw_text=raw_text, members=members,
-                comment=comment, display_name=node.spelling,
-                filename=str(decl.location.file), lineno=decl.location.line)
+        anonymous = not node.spelling
 
-    def __create_enum_symbol (self, node, comment):
+        return self.__doc_db.get_or_create_symbol(StructSymbol, raw_text=raw_text,
+                members=members, anonymous=anonymous,
+                comment=comment, display_name=spelling,
+                filename=str(node.location.file), lineno=node.location.line)
+
+    def __create_enum_symbol (self, node, comment, spelling=None):
+        spelling = spelling or node.spelling
         members = []
-        underlying = node.underlying_typedef_type
-        decl = underlying.get_declaration()
-        for member in decl.get_children():
+        for member in node.get_children():
             if comment:
                 member_comment = comment.params.get (member.spelling)
             else:
@@ -427,8 +435,11 @@ class ClangScanner(object):
             member.enum_value = member_value
             members.append (member)
 
-        return self.__doc_db.get_or_create_symbol(EnumSymbol, members=members, comment=comment, display_name=node.spelling,
-                filename=str(decl.location.file), lineno=decl.location.line)
+        anonymous = not node.spelling
+
+        return self.__doc_db.get_or_create_symbol(EnumSymbol, members=members,
+                anonymous=anonymous, comment=comment, display_name=spelling,
+                filename=str(node.location.file), lineno=node.location.line)
 
     def __create_alias_symbol (self, node, comment):
         type_tokens = self.make_c_style_type_name(node.underlying_typedef_type)
@@ -439,18 +450,17 @@ class ClangScanner(object):
 
     def __create_typedef_symbol (self, node):
         t = node.underlying_typedef_type
+        decl = t.get_declaration()
         comment = self.doc_repo.doc_database.get_comment (node.spelling)
         if ast_node_is_function_pointer (t):
             sym = self.__create_callback_symbol (node, comment)
+        elif not decl.spelling and decl.kind == clang.cindex.CursorKind.STRUCT_DECL: # typedef struct {} foo;
+            sym = self.__create_struct_symbol (decl, comment, spelling=node.spelling)
+        elif not decl.spelling and decl.kind == clang.cindex.CursorKind.ENUM_DECL: # typedef enum {} bar;
+            sym = self.__create_enum_symbol (decl, comment, spelling=node.spelling)
         else:
-            d = t.get_declaration()
+            sym = self.__create_alias_symbol (node, comment)
 
-            if d.kind == clang.cindex.CursorKind.STRUCT_DECL:
-                sym = self.__create_struct_symbol (node, comment)
-            elif d.kind == clang.cindex.CursorKind.ENUM_DECL:
-                sym = self.__create_enum_symbol (node, comment)
-            else:
-                sym = self.__create_alias_symbol (node, comment)
         return sym
 
     def __create_macro_from_raw_text(self, raw):
@@ -581,6 +591,7 @@ class CExtension(BaseExtension):
         self.doc_repo = doc_repo
         file_includer.include_signal.connect(self.__include_file_cb)
         self.scanner = ClangScanner(self.doc_repo, self)
+        self.formatters = {'html': CHtmlFormatter()}
 
     # pylint: disable=no-self-use
     def __include_file_cb(self, include_path, line_ranges, symbol_name):
@@ -639,6 +650,7 @@ class CExtension(BaseExtension):
     @staticmethod
     def add_arguments (parser):
         group = parser.add_argument_group('C extension', DESCRIPTION)
+        CExtension.add_index_argument(group)
         CExtension.add_sources_argument(group)
         CExtension.add_paths_argument(group, "include-directories",
                 help_="List extra include directories here")

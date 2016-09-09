@@ -641,8 +641,8 @@ class CExtension(BaseExtension):
 
         return None
 
-    def _get_languages(self):
-        return ['c']
+    def _get_smart_index_title(self):
+        return 'C API Reference'
 
     def get_or_create_symbol(self, *args, **kwargs):
         kwargs['language'] = 'c'

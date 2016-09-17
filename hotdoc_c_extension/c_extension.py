@@ -113,19 +113,7 @@ class ClangScanner(object):
 
         debug('CFLAGS %s' % ' '.join(args))
 
-        if not full_scan:
-            for filename in filenames:
-                with open (filename, 'r') as f:
-                    debug('Getting comments in %s' % filename)
-                    cs = get_comments (filename)
-                    for c in cs:
-                        if c[4]:
-                            block = self.__raw_comment_parser.parse_comment(c[0],
-                                c[1], c[2], c[3], self.doc_repo.include_paths)
-                            if block is not None:
-                                self.doc_repo.doc_database.add_comment(block)
-                        else:
-                            self.__create_macro_from_raw_text(c)
+        header_guarded = set()
 
         for filename in self.filenames:
             if filename in self.parsed:
@@ -139,9 +127,32 @@ class ClangScanner(object):
                     warn('clang-diagnostic', 'Clang issue : %s' % str(diag))
 
                 self.__parse_file (filename, tu, full_scan)
+                if (clang.cindex.conf.lib.clang_isFileMultipleIncludeGuarded(tu, tu.get_file(filename))):
+                    header_guarded.add(filename)
+
                 for include in tu.get_includes():
                     fname = os.path.abspath(str(include.include))
+                    if (clang.cindex.conf.lib.clang_isFileMultipleIncludeGuarded(tu, tu.get_file(fname))):
+                        if fname in self.filenames:
+                            header_guarded.add(fname)
                     self.__parse_file (fname, tu, full_scan)
+
+        if not full_scan:
+            for filename in filenames:
+                with open (filename, 'r') as f:
+                    debug('Getting comments in %s' % filename)
+                    cs = get_comments (filename)
+                    for i, c in enumerate(cs):
+                        if i == 0 and filename in header_guarded:
+                            continue
+                        if c[4]:
+                            block = self.__raw_comment_parser.parse_comment(c[0],
+                                c[1], c[2], c[3], self.doc_repo.include_paths)
+                            if block is not None:
+                                self.doc_repo.doc_database.add_comment(block)
+                        else:
+                            self.__create_macro_from_raw_text(c)
+
         return True
 
     def set_extension(self, extension):
@@ -216,11 +227,9 @@ class ClangScanner(object):
             elif node.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
                 sym = self.__create_typedef_symbol (node)
             elif node.kind == clang.cindex.CursorKind.STRUCT_DECL and node.spelling:
-                comment = self.doc_repo.doc_database.get_comment (node.spelling)
-                sym = self.__create_struct_symbol(node, comment)
+                sym = self.__create_struct_symbol(node)
             elif node.kind == clang.cindex.CursorKind.ENUM_DECL and node.spelling:
-                comment = self.doc_repo.doc_database.get_comment (node.spelling)
-                sym = self.__create_enum_symbol(node, comment)
+                sym = self.__create_enum_symbol(node)
 
             if sym is not None:
                 self.symbols[sym.unique_name] = sym
@@ -270,14 +279,8 @@ class ClangScanner(object):
         tokens.reverse()
         return tokens
 
-    def __create_callback_symbol (self, node, comment):
+    def __create_callback_symbol (self, node):
         parameters = []
-
-        if comment:
-            return_tag = comment.tags.get('returns')
-            return_comment = comment_from_tag(return_tag)
-        else:
-            return_comment = None
 
         return_value = None
 
@@ -286,24 +289,18 @@ class ClangScanner(object):
                 t = node.underlying_typedef_type
                 res = t.get_pointee().get_result()
                 type_tokens = self.make_c_style_type_name (res)
-                return_value = [ReturnItemSymbol(type_tokens=type_tokens,
-                        comment=return_comment)]
+                return_value = [ReturnItemSymbol(type_tokens=type_tokens)]
             else:
-                if comment:
-                    param_comment = comment.params.get (child.displayname)
-                else:
-                    param_comment = None
-
                 type_tokens = self.make_c_style_type_name (child.type)
                 parameter = ParameterSymbol (argname=child.displayname,
-                        type_tokens=type_tokens, comment=param_comment)
+                        type_tokens=type_tokens)
                 parameters.append (parameter)
 
         if not return_value:
-            return_value = [ReturnItemSymbol(type_tokens=[], comment=None)]
+            return_value = [ReturnItemSymbol(type_tokens=[])]
 
         sym = self.__doc_db.get_or_create_symbol(CallbackSymbol, parameters=parameters,
-                return_value=return_value, comment=comment, display_name=node.spelling,
+                return_value=return_value, display_name=node.spelling,
                 filename=str(node.location.file), lineno=node.location.line)
         return sym
 
@@ -391,22 +388,16 @@ class ClangScanner(object):
                     delimiters.append((False, tok.location.line))
         return had_public
 
-    def __create_struct_symbol (self, node, comment, spelling=None):
+    def __create_struct_symbol (self, node, spelling=None):
         spelling = spelling or node.spelling
         raw_text, public_fields = self.__parse_public_fields (node)
         raw_text = unicode(raw_text.decode('utf8'))
         members = []
         for field in public_fields:
-            if comment:
-                member_comment = comment.params.get (field.spelling)
-            else:
-                member_comment = None
-
             type_tokens = self.make_c_style_type_name (field.type)
             is_function_pointer = ast_node_is_function_pointer (field.type)
             member = FieldSymbol (is_function_pointer=is_function_pointer,
-                    member_name=field.spelling, type_tokens=type_tokens,
-                    comment=member_comment)
+                    member_name=field.spelling, type_tokens=type_tokens)
             members.append (member)
 
         if not public_fields:
@@ -416,20 +407,16 @@ class ClangScanner(object):
 
         return self.__doc_db.get_or_create_symbol(StructSymbol, raw_text=raw_text,
                 members=members, anonymous=anonymous,
-                comment=comment, display_name=spelling,
+                display_name=spelling,
                 filename=str(node.location.file), lineno=node.location.line)
 
-    def __create_enum_symbol (self, node, comment, spelling=None):
+    def __create_enum_symbol (self, node, spelling=None):
         spelling = spelling or node.spelling
         members = []
         for member in node.get_children():
-            if comment:
-                member_comment = comment.params.get (member.spelling)
-            else:
-                member_comment = None
             member_value = member.enum_value
             # FIXME: this is pretty much a macro symbol ?
-            member = self.__doc_db.get_or_create_symbol(Symbol, comment=member_comment, display_name=member.spelling,
+            member = self.__doc_db.get_or_create_symbol(Symbol, display_name=member.spelling,
                     filename=str(member.location.file),
                     lineno=member.location.line)
             member.enum_value = member_value
@@ -444,28 +431,27 @@ class ClangScanner(object):
         raw_text = '\n'.join(original_lines)
 
         return self.__doc_db.get_or_create_symbol(EnumSymbol, members=members,
-                anonymous=anonymous, raw_text=raw_text, comment=comment, display_name=spelling,
+                anonymous=anonymous, raw_text=raw_text, display_name=spelling,
                 filename=str(node.location.file), lineno=node.location.line)
 
-    def __create_alias_symbol (self, node, comment):
+    def __create_alias_symbol (self, node):
         type_tokens = self.make_c_style_type_name(node.underlying_typedef_type)
         aliased_type = QualifiedSymbol (type_tokens=type_tokens)
-        return self.__doc_db.get_or_create_symbol(AliasSymbol, aliased_type=aliased_type, comment=comment,
+        return self.__doc_db.get_or_create_symbol(AliasSymbol, aliased_type=aliased_type,
                 display_name=node.spelling, filename=str(node.location.file),
                 lineno=node.location.line)
 
     def __create_typedef_symbol (self, node):
         t = node.underlying_typedef_type
         decl = t.get_declaration()
-        comment = self.doc_repo.doc_database.get_comment (node.spelling)
         if ast_node_is_function_pointer (t):
-            sym = self.__create_callback_symbol (node, comment)
+            sym = self.__create_callback_symbol (node)
         elif not decl.spelling and decl.kind == clang.cindex.CursorKind.STRUCT_DECL: # typedef struct {} foo;
-            sym = self.__create_struct_symbol (decl, comment, spelling=node.spelling)
+            sym = self.__create_struct_symbol (decl, spelling=node.spelling)
         elif not decl.spelling and decl.kind == clang.cindex.CursorKind.ENUM_DECL: # typedef enum {} bar;
-            sym = self.__create_enum_symbol (decl, comment, spelling=node.spelling)
+            sym = self.__create_enum_symbol (decl, spelling=node.spelling)
         else:
-            sym = self.__create_alias_symbol (node, comment)
+            sym = self.__create_alias_symbol (node)
 
         return sym
 
@@ -478,69 +464,55 @@ class ClangScanner(object):
             args = split[1].split(')', 1)[0].split(',')
             if args:
                 stripped_name = name.strip()
-                comment = self.doc_repo.doc_database.get_comment(stripped_name)
                 return self.__create_function_macro_symbol(stripped_name,
-                    raw[1], raw[2], comment, raw[0])
+                    raw[1], raw[2], raw[0])
 
         name = mcontent.split(' ', 1)[0]
         stripped_name = name.strip()
-        comment = self.doc_repo.doc_database.get_comment(stripped_name)
-        return self.__create_constant_symbol(stripped_name, raw[1], raw[2],
-            comment, raw[0])
+        return self.__create_constant_symbol(stripped_name, raw[1], raw[2], raw[0])
 
-    def __create_function_macro_symbol (self, name, filename, lineno, comment, original_text):
+    def __create_function_macro_symbol (self, name, filename, lineno, original_text):
+        comment = self.doc_repo.doc_database.get_comment(name)
+
         return_value = [None]
         if comment:
             return_tag = comment.tags.get ('returns')
             if return_tag:
-                return_comment = comment_from_tag (return_tag)
-                return_value = [ReturnItemSymbol (comment=return_comment)]
+                return_value = [ReturnItemSymbol ()]
 
         parameters = []
+
         if comment:
-            for param_name, param_comment in comment.params.iteritems():
-                parameter = ParameterSymbol (argname=param_name, comment=param_comment)
+            for param_name in comment.params:
+                parameter = ParameterSymbol (argname=param_name)
                 parameters.append (parameter)
 
         sym = self.__doc_db.get_or_create_symbol(FunctionMacroSymbol, return_value=return_value,
                 parameters=parameters, original_text=original_text,
-                comment=comment, display_name=name,
+                display_name=name,
                 filename=filename, lineno=lineno)
         return sym
 
-    def __create_constant_symbol (self, name, filename, lineno, comment, original_text):
+    def __create_constant_symbol (self, name, filename, lineno, original_text):
         return self.__doc_db.get_or_create_symbol(ConstantSymbol,
-                original_text=original_text, comment=comment,
+                original_text=original_text,
                 display_name=name, filename=filename,
                 lineno=lineno)
 
     def __create_function_symbol (self, node):
-        comment = self.doc_repo.doc_database.get_comment (node.spelling)
         parameters = []
 
-        if comment:
-            return_tag = comment.tags.get('returns')
-            return_comment = comment_from_tag(return_tag)
-        else:
-            return_comment = None
-
         type_tokens = self.make_c_style_type_name (node.result_type)
-        return_value = [ReturnItemSymbol (type_tokens=type_tokens,
-                comment=return_comment)]
+        return_value = [ReturnItemSymbol (type_tokens=type_tokens)]
 
         for param in node.get_arguments():
-            if comment:
-                param_comment = comment.params.get (param.displayname)
-            else:
-                param_comment = None
-
             type_tokens = self.make_c_style_type_name (param.type)
             parameter = ParameterSymbol (argname=param.displayname,
-                    type_tokens=type_tokens, comment=param_comment)
+                    type_tokens=type_tokens)
             parameters.append (parameter)
 
         sym = self.__doc_db.get_or_create_symbol(FunctionSymbol, parameters=parameters,
-                return_value=return_value, comment=comment, display_name=node.spelling,
+                return_value=return_value, display_name=node.spelling,
                 filename=str(node.location.file), lineno=node.location.line,
                 extent_start=node.extent.start.line,
                 extent_end=node.extent.end.line)
@@ -557,13 +529,11 @@ class ClangScanner(object):
         original_lines = [linecache.getline(filename, i).rstrip() for i in range(start,
             end)]
         original_text = '\n'.join(original_lines)
-        comment = self.doc_repo.doc_database.get_comment (node.spelling)
 
         type_tokens = self.make_c_style_type_name(node.type)
         type_qs = QualifiedSymbol(type_tokens=type_tokens)
 
         sym = self.__doc_db.get_or_create_symbol(ExportedVariableSymbol, original_text=original_text,
-                comment=self.doc_repo.doc_database.get_comment (node.spelling),
                 display_name=node.spelling, filename=str(node.location.file),
                 lineno=node.location.line, type_qs=type_qs)
         return sym

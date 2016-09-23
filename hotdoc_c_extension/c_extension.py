@@ -121,6 +121,8 @@ class ClangScanner(object):
 
             do_full_scan = any(fnmatch(filename, p) for p in full_scan_patterns)
             if do_full_scan:
+                debug('scanning %s' % filename)
+
                 tu = index.parse(filename, args=args, options=flags)
 
                 for diag in tu.diagnostics:
@@ -140,18 +142,20 @@ class ClangScanner(object):
         if not full_scan:
             for filename in filenames:
                 with open (filename, 'r') as f:
+                    skip_next_symbol = filename in header_guarded
                     debug('Getting comments in %s' % filename)
                     cs = get_comments (filename)
-                    for i, c in enumerate(cs):
-                        if i == 0 and filename in header_guarded:
-                            continue
+                    for c in cs:
                         if c[4]:
                             block = self.__raw_comment_parser.parse_comment(c[0],
                                 c[1], c[2], c[3], self.doc_repo.include_paths)
                             if block is not None:
                                 self.doc_repo.doc_database.add_comment(block)
+                        elif not skip_next_symbol:
+                            if filename.endswith('.h'):
+                                self.__create_macro_from_raw_text(c)
                         else:
-                            self.__create_macro_from_raw_text(c)
+                            skip_next_symbol = False
 
         return True
 
@@ -273,6 +277,16 @@ class ClangScanner(object):
 
             tokens.append (link)
             self.__apply_qualifiers(type_, tokens)
+        elif type_.kind == clang.cindex.TypeKind.UNEXPOSED:
+            d = type_.get_declaration()
+            if d.spelling:
+                tokens.append(Link(None, d.displayname, d.displayname))
+            else:
+                tokens.append('__UNKNOWN__')
+            if d.kind == clang.cindex.CursorKind.STRUCT_DECL:
+                tokens.append ('struct ')
+            elif d.kind == clang.cindex.CursorKind.ENUM_DECL:
+                tokens.append ('enum ')
         else:
             tokens.append (type_.spelling + ' ')
 

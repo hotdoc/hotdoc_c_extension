@@ -655,7 +655,3 @@ class CExtension(BaseExtension):
         CExtension.flags = flags_from_config(config, doc_repo)
         for dir_ in CExtension.include_directories:
             CExtension.flags.append('-I%s' % dir_)
-
-
-def get_extension_classes():
-    return [CExtension]

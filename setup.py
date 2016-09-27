@@ -118,9 +118,13 @@ setup(
     author = "Mathieu Duponchelle",
     packages = find_packages(),
     package_data = {
+        '': ['*.html'],
         'hotdoc_c_extension': ['VERSION.txt'],
+        'hotdoc_c_extension.transition_scripts': ['translate_sections.sh'],
     },
-    entry_points = {'hotdoc.extensions': 'get_extension_classes = hotdoc_c_extension.c_extension:get_extension_classes'},
+    entry_points = {'hotdoc.extensions': 'get_extension_classes = hotdoc_c_extension.extensions:get_extension_classes'},
+    scripts=['hotdoc_c_extension/transition_scripts/hotdoc_gtk_doc_porter',
+             'hotdoc_c_extension/transition_scripts/hotdoc_gtk_doc_scan_parser'],
     cmdclass = {'build_ext': build_ext},
     ext_modules = [c_comment_scanner_module],
     install_requires = [

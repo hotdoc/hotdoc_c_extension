@@ -410,8 +410,11 @@ class ClangScanner(object):
         for field in public_fields:
             type_tokens = self.make_c_style_type_name (field.type)
             is_function_pointer = ast_node_is_function_pointer (field.type)
+            qtype = QualifiedSymbol(type_tokens=type_tokens)
+            name = '%s.%s' % (spelling, field.spelling)
             member = FieldSymbol (is_function_pointer=is_function_pointer,
-                    member_name=field.spelling, type_tokens=type_tokens)
+                    member_name=field.spelling, qtype=qtype,
+                    display_name=name, unique_name=name)
             members.append (member)
 
         if not public_fields:

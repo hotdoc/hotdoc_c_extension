@@ -148,6 +148,7 @@ class GIExtension(BaseExtension):
 
         self.__parsed_girs = set()
         self.__node_cache = {}
+        self.__own_symbols = set()
 
         # If generating the index ourselves, we will filter these functions
         # out.
@@ -238,12 +239,15 @@ class GIExtension(BaseExtension):
         self.info('Gathering legacy gtk-doc links')
         self.__gather_gtk_doc_links()
         Page.resolving_symbol_signal.connect (self.__resolving_symbol)
+        Link.resolving_link_signal.connect(self.__translate_link_ref)
 
     def format_page(self, page, link_resolver, output):
         LinkResolver.get_link_signal.connect(self.__search_legacy_links)
         Formatter.formatting_symbol_signal.connect(self.__formatting_symbol)
         formatter = self.get_formatter('html')
+        page.meta['extra']['gi-languages'] = ','.join(self.languages)
         for l in self.languages:
+            page.meta['extra']['gi-language'] = l
             self.setup_language (l)
             BaseExtension.format_page (self, page, link_resolver, output)
 
@@ -280,7 +284,7 @@ class GIExtension(BaseExtension):
         self.__smart_filters.add(('%s_%s_GET_CLASS' % (sym_prefixes, sym_prefix)).upper())
         self.__smart_filters.add(('%s_%s_GET_IFACE' % (sym_prefixes, sym_prefix)).upper())
 
-    def __cache_nodes(self, gir_root):
+    def __cache_nodes(self, gir_root, own=True):
         ns_node = gir_root.find('./{%s}namespace' % self.__nsmap['core'])
         id_prefixes = ns_node.attrib['{%s}identifier-prefixes' % self.__nsmap['c']]
         sym_prefixes = ns_node.attrib['{%s}symbol-prefixes' % self.__nsmap['c']]
@@ -290,6 +294,8 @@ class GIExtension(BaseExtension):
                 './/*[@c:identifier]',
                 namespaces=self.__nsmap):
             self.__node_cache[node.attrib[id_key]] = node
+            if own:
+                self.__own_symbols.add(node.attrib[id_key])
 
         id_type = '{%s}type' % self.__nsmap['c']
         class_tag = '{%s}class' % self.__nsmap['core']
@@ -299,6 +305,8 @@ class GIExtension(BaseExtension):
                 namespaces=self.__nsmap):
             name = node.attrib[id_type]
             self.__node_cache[name] = node
+            if own:
+                self.__own_symbols.add(name)
             if node.tag in [class_tag, interface_tag]:
                 gi_name = '.'.join(self.__get_gi_name_components(node))
                 self.__class_nodes[gi_name] = node
@@ -306,6 +314,8 @@ class GIExtension(BaseExtension):
                     self.__nsmap['glib'])
                 self.__get_type_functions.add(get_type_function)
                 self.__node_cache['%s::%s' % (name, name)] = node
+                if own:
+                    self.__own_symbols.add('%s::%s' % (name, name))
                 self.__generate_smart_filters(id_prefixes, sym_prefixes, node)
 
         for node in gir_root.xpath(
@@ -314,6 +324,8 @@ class GIExtension(BaseExtension):
             name = '%s:%s' % (self.__get_klass_name(node.getparent()),
                               node.attrib['name'])
             self.__node_cache[name] = node
+            if own:
+                self.__own_symbols.add(name)
 
         for node in gir_root.xpath(
                 './/glib:signal',
@@ -321,6 +333,8 @@ class GIExtension(BaseExtension):
             name = '%s::%s' % (self.__get_klass_name(node.getparent()),
                                node.attrib['name'])
             self.__node_cache[name] = node
+            if own:
+                self.__own_symbols.add(name)
 
         for node in gir_root.xpath(
                 './/core:virtual-method',
@@ -328,6 +342,8 @@ class GIExtension(BaseExtension):
             name = '%s:::%s' % (self.__get_klass_name(node.getparent()),
                                 node.attrib['name'])
             self.__node_cache[name] = node
+            if own:
+                self.__own_symbols.add(name)
 
         for inc in gir_root.findall('./core:include',
                 namespaces = self.__nsmap):
@@ -345,7 +361,7 @@ class GIExtension(BaseExtension):
 
             self.__parsed_girs.add(gir_file)
             inc_gir_root = etree.parse(gir_file).getroot()
-            self.__cache_nodes(inc_gir_root)
+            self.__cache_nodes(inc_gir_root, own=False)
 
     def __create_hierarchies(self):
         for gi_name, klass in self.__class_nodes.iteritems():
@@ -414,7 +430,7 @@ class GIExtension(BaseExtension):
         if not online:
             if not name:
                 return False
-            online = 'https://developer.gnome.org/%s/unstable' % name
+            online = 'https://developer.gnome.org/%s/unstable/' % name
 
         keywords = dh_root.findall('.//{http://www.devhelp.net/book}keyword')
         for kw in keywords:
@@ -515,12 +531,20 @@ class GIExtension(BaseExtension):
         return True
 
     def __translate_link_ref(self, link):
+        if self.language is None:
+            if link.ref and link.id_ in self.__own_symbols:
+                return '%s/%s' % (self.languages[0], link.ref)
+            return None
+
         fund = self._fundamentals.get(link.id_)
         if fund:
             return fund.ref
 
+        if link.ref and link.id_ in self.__own_symbols:
+            return '%s/%s' % (self.language, link.ref)
+
         if link.ref and self.language != 'c' and not self.__is_introspectable(link.id_):
-            return '../c/' + link.ref
+            return 'c/' + link.ref
 
         if link.ref == None:
             return self.__gtkdoc_hrefs.get(link.id_)
@@ -554,11 +578,6 @@ class GIExtension(BaseExtension):
         self.language = language
 
         try:
-            Link.resolving_link_signal.disconnect(self.__translate_link_ref)
-        except KeyError:
-            pass
-
-        try:
             Link.resolving_title_signal.disconnect(self.__translate_link_title)
         except KeyError:
             pass
@@ -572,7 +591,6 @@ class GIExtension(BaseExtension):
         """
 
         if language is not None:
-            Link.resolving_link_signal.connect(self.__translate_link_ref)
             Link.resolving_title_signal.connect(self.__translate_link_title)
             """
             self.doc_repo.doc_tree.page_parser.renaming_page_link_signal.connect(

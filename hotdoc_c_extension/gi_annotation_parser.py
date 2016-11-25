@@ -149,7 +149,7 @@ class GIAnnotationParser(object):
         annotation_val = None
         if type(value) == dict:
             annotation_val = ""
-            for name, val in value.iteritems():
+            for name, val in value.items():
                 annotation_val += "%s=%s" % (name, val)
         return GIAnnotation ("array", ARRAY_HELP, annotation_val)
 
@@ -192,7 +192,7 @@ class GIAnnotationParser(object):
 
         annotations = []
 
-        for ann, val in parameter.comment.annotations.iteritems():
+        for ann, val in parameter.comment.annotations.items():
             if ann == "skip":
                 continue
             annotation = self.__create_annotation (ann, val.argument)
@@ -202,7 +202,7 @@ class GIAnnotationParser(object):
                         val.argument[0] == 'nullable'):
                     annotations.append(self.__make_not_nullable_annotation())
                 else:
-                    print "This parameter annotation is unknown :[" + ann + "]", val.argument
+                    print("This parameter annotation is unknown :[" + ann + "]", val.argument)
                 continue
             annotations.append (annotation)
 

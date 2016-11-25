@@ -18,7 +18,7 @@
 
 import os, sys, linecache, pkgconfig, glob, subprocess
 
-import clang.cindex
+from hotdoc_c_extension.clang import cindex
 from ctypes import *
 from fnmatch import fnmatch
 
@@ -38,9 +38,9 @@ from .c_comment_scanner.c_comment_scanner import get_comments
 from .c_html_formatter import CHtmlFormatter
 
 def ast_node_is_function_pointer (ast_node):
-    if ast_node.kind == clang.cindex.TypeKind.POINTER and \
+    if ast_node.kind == cindex.TypeKind.POINTER and \
             ast_node.get_pointee().get_result().kind != \
-            clang.cindex.TypeKind.INVALID:
+            cindex.TypeKind.INVALID:
         return True
     return False
 
@@ -71,8 +71,8 @@ CLANG_HEADERS_WARNING = (
 
 
 def get_clang_headers():
-    version = subprocess.check_output(['llvm-config', '--version']).strip()
-    prefix = subprocess.check_output(['llvm-config', '--prefix']).strip()
+    version = subprocess.check_output(['llvm-config', '--version']).strip().decode()
+    prefix = subprocess.check_output(['llvm-config', '--prefix']).strip().decode()
 
     for lib in ['lib', 'lib64']:
         p = os.path.join(prefix, lib, 'clang', version, 'include')
@@ -82,15 +82,16 @@ def get_clang_headers():
     warn('clang-headers-not-found', CLANG_HEADERS_WARNING)
 
 def get_clang_libdir():
-    return subprocess.check_output(['llvm-config', '--libdir']).strip()
+    return subprocess.check_output(['llvm-config', '--libdir']).strip().decode()
 
 class ClangScanner(object):
     def __init__(self, doc_repo, doc_db):
-        if not clang.cindex.Config.loaded:
+        if not cindex.Config.loaded:
             # Let's try and find clang ourselves first
             clang_libdir = get_clang_libdir()
             if os.path.exists(clang_libdir):
-                clang.cindex.Config.set_library_path(clang_libdir)
+                cindex.Config.set_library_path(clang_libdir)
+            cindex.Config.set_compatibility_check(False)
 
         self.__raw_comment_parser = GtkDocParser(doc_repo)
         self.doc_repo = doc_repo
@@ -98,8 +99,8 @@ class ClangScanner(object):
 
     def scan(self, filenames, options, incremental, full_scan,
              full_scan_patterns, fail_fast=False):
-        index = clang.cindex.Index.create()
-        flags = clang.cindex.TranslationUnit.PARSE_INCOMPLETE | clang.cindex.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD
+        index = cindex.Index.create()
+        flags = cindex.TranslationUnit.PARSE_INCOMPLETE | cindex.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD
 
         info('scanning %d C source files' % len(filenames))
         self.filenames = filenames
@@ -126,15 +127,16 @@ class ClangScanner(object):
                 tu = index.parse(filename, args=args, options=flags)
 
                 for diag in tu.diagnostics:
+                    s = diag.format()
                     warn('clang-diagnostic', 'Clang issue : %s' % str(diag))
 
                 self.__parse_file (filename, tu, full_scan)
-                if (clang.cindex.conf.lib.clang_isFileMultipleIncludeGuarded(tu, tu.get_file(filename))):
+                if (cindex.conf.lib.clang_isFileMultipleIncludeGuarded(tu, tu.get_file(filename))):
                     header_guarded.add(filename)
 
                 for include in tu.get_includes():
                     fname = os.path.abspath(str(include.include))
-                    if (clang.cindex.conf.lib.clang_isFileMultipleIncludeGuarded(tu, tu.get_file(fname))):
+                    if (cindex.conf.lib.clang_isFileMultipleIncludeGuarded(tu, tu.get_file(fname))):
                         if fname in self.filenames:
                             header_guarded.add(fname)
                     self.__parse_file (fname, tu, full_scan)
@@ -175,7 +177,7 @@ class ClangScanner(object):
 
         start = tu.get_location (filename, 0)
         end = tu.get_location (filename, int(os.path.getsize(filename)))
-        extent = clang.cindex.SourceRange.from_locations (start, end)
+        extent = cindex.SourceRange.from_locations (start, end)
         cursors = self.__get_cursors(tu, extent)
 
         # Happens with empty source files
@@ -187,10 +189,10 @@ class ClangScanner(object):
 
     # That's the fastest way of obtaining our ast nodes for a given filename
     def __get_cursors (self, tu, extent):
-        tokens_memory = POINTER(clang.cindex.Token)()
+        tokens_memory = POINTER(cindex.Token)()
         tokens_count = c_uint()
 
-        clang.cindex.conf.lib.clang_tokenize(tu, extent, byref(tokens_memory),
+        cindex.conf.lib.clang_tokenize(tu, extent, byref(tokens_memory),
                 byref(tokens_count))
 
         count = int(tokens_count.value)
@@ -198,8 +200,8 @@ class ClangScanner(object):
         if count < 1:
             return
 
-        cursors = (clang.cindex.Cursor * count)()
-        clang.cindex.conf.lib.clang_annotateTokens (tu, tokens_memory, tokens_count,
+        cursors = (cindex.Cursor * count)()
+        cindex.conf.lib.clang_annotateTokens (tu, tokens_memory, tokens_count,
                 cursors)
 
         return cursors
@@ -211,12 +213,12 @@ class ClangScanner(object):
             # This is dubious, needed to parse G_DECLARE_FINAL_TYPE
             # investigate further (fortunately this doesn't seem to
             # significantly impact performance ( ~ 5% )
-            if node.kind == clang.cindex.CursorKind.TYPE_REF:
+            if node.kind == cindex.CursorKind.TYPE_REF:
                 node = node.get_definition()
                 if not node:
                     continue
 
-                if not unicode(node.location.file) in self.filenames:
+                if not str(node.location.file) in self.filenames:
                     continue
 
             if node.spelling in self.symbols:
@@ -226,13 +228,13 @@ class ClangScanner(object):
             func_dec = self.__getFunctionDeclNode(node)
             if func_dec and func_dec.spelling not in self.symbols:
                 sym = self.__create_function_symbol(func_dec)
-            elif node.kind == clang.cindex.CursorKind.VAR_DECL:
+            elif node.kind == cindex.CursorKind.VAR_DECL:
                 sym = self.__create_exported_variable_symbol (node)
-            elif node.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
+            elif node.kind == cindex.CursorKind.TYPEDEF_DECL:
                 sym = self.__create_typedef_symbol (node)
-            elif node.kind == clang.cindex.CursorKind.STRUCT_DECL and node.spelling:
+            elif node.kind == cindex.CursorKind.STRUCT_DECL and node.spelling:
                 sym = self.__create_struct_symbol(node)
-            elif node.kind == clang.cindex.CursorKind.ENUM_DECL and node.spelling:
+            elif node.kind == cindex.CursorKind.ENUM_DECL and node.spelling:
                 sym = self.__create_enum_symbol(node)
 
             if sym is not None:
@@ -243,15 +245,15 @@ class ClangScanner(object):
         if not node.location.file:
             return None
         elif node.location.file.name.endswith(".h"):
-            if node.kind == clang.cindex.CursorKind.FUNCTION_DECL:
+            if node.kind == cindex.CursorKind.FUNCTION_DECL:
                 return node
             else:
                 return None
 
-        if node.kind != clang.cindex.CursorKind.COMPOUND_STMT:
+        if node.kind != cindex.CursorKind.COMPOUND_STMT:
             return None
 
-        if node.semantic_parent.kind == clang.cindex.CursorKind.FUNCTION_DECL:
+        if node.semantic_parent.kind == cindex.CursorKind.FUNCTION_DECL:
             return node.semantic_parent
 
         return None
@@ -266,26 +268,26 @@ class ClangScanner(object):
 
     def make_c_style_type_name (self, type_):
         tokens = []
-        while (type_.kind == clang.cindex.TypeKind.POINTER):
+        while (type_.kind == cindex.TypeKind.POINTER):
             self.__apply_qualifiers(type_, tokens)
             tokens.append ('*')
             type_ = type_.get_pointee()
 
-        if type_.kind == clang.cindex.TypeKind.TYPEDEF:
+        if type_.kind == cindex.TypeKind.TYPEDEF:
             d = type_.get_declaration ()
             link = Link (None, d.displayname, d.displayname)
 
             tokens.append (link)
             self.__apply_qualifiers(type_, tokens)
-        elif type_.kind == clang.cindex.TypeKind.UNEXPOSED:
+        elif type_.kind == cindex.TypeKind.UNEXPOSED:
             d = type_.get_declaration()
             if d.spelling:
                 tokens.append(Link(None, d.displayname, d.displayname))
             else:
                 tokens.append('__UNKNOWN__')
-            if d.kind == clang.cindex.CursorKind.STRUCT_DECL:
+            if d.kind == cindex.CursorKind.STRUCT_DECL:
                 tokens.append ('struct ')
-            elif d.kind == clang.cindex.CursorKind.ENUM_DECL:
+            elif d.kind == cindex.CursorKind.ENUM_DECL:
                 tokens.append ('enum ')
         else:
             tokens.append (type_.spelling + ' ')
@@ -391,7 +393,7 @@ class ClangScanner(object):
         protected_pattern = "/*<protected>*/"
         had_public = False
         for tok in tokens:
-            if tok.kind == clang.cindex.TokenKind.COMMENT:
+            if tok.kind == cindex.TokenKind.COMMENT:
                 comment = ''.join(tok.spelling.split())
                 if public_pattern == comment:
                     had_public = True
@@ -405,15 +407,14 @@ class ClangScanner(object):
     def __create_struct_symbol (self, node, spelling=None):
         spelling = spelling or node.spelling
         raw_text, public_fields = self.__parse_public_fields (node)
-        raw_text = unicode(raw_text.decode('utf8'))
         members = []
         for field in public_fields:
             type_tokens = self.make_c_style_type_name (field.type)
             is_function_pointer = ast_node_is_function_pointer (field.type)
             qtype = QualifiedSymbol(type_tokens=type_tokens)
             name = '%s.%s' % (spelling, field.spelling)
-            member = FieldSymbol (is_function_pointer=is_function_pointer,
-                    member_name=field.spelling, qtype=qtype,
+            member = self.__doc_db.get_or_create_symbol(FieldSymbol, is_function_pointer=is_function_pointer,
+                    member_name=field.spelling, qtype=qtype, filename=str(node.location.file),
                     display_name=name, unique_name=name)
             members.append (member)
 
@@ -463,9 +464,9 @@ class ClangScanner(object):
         decl = t.get_declaration()
         if ast_node_is_function_pointer (t):
             sym = self.__create_callback_symbol (node)
-        elif not decl.spelling and decl.kind == clang.cindex.CursorKind.STRUCT_DECL: # typedef struct {} foo;
+        elif not decl.spelling and decl.kind == cindex.CursorKind.STRUCT_DECL: # typedef struct {} foo;
             sym = self.__create_struct_symbol (decl, spelling=node.spelling)
-        elif not decl.spelling and decl.kind == clang.cindex.CursorKind.ENUM_DECL: # typedef enum {} bar;
+        elif not decl.spelling and decl.kind == cindex.CursorKind.ENUM_DECL: # typedef enum {} bar;
             sym = self.__create_enum_symbol (decl, spelling=node.spelling)
         else:
             sym = self.__create_alias_symbol (node)

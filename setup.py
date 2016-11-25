@@ -50,8 +50,7 @@ class FlexExtension (Extension):
             try:
                 spawn(cmd, verbose=1)
             except DistutilsExecError:
-                raise DistutilsExecError,\
-                        ("Make sure flex is installed on your system")
+                raise DistutilsExecError(("Make sure flex is installed on your system"))
 
     def build_custom (self, build_path):
         if self.__flex_sources:
@@ -86,19 +85,19 @@ c_comment_scanner_module = FlexExtension(
 known_clang_versions = VersionList([V('3.2'), V('3.3'), V('3.4'), V('3.5'), V('3.7')])
 
 try:
-    clang_version = subprocess.check_output(['llvm-config', '--version'])
+    clang_version = subprocess.check_output(['llvm-config', '--version']).decode()
 except OSError as e:
-    print "Error when trying to figure out the clang version"
-    print "llvm-config is probably not installed\n"
+    print("Error when trying to figure out the clang version")
+    print("llvm-config is probably not installed\n")
     raise e
 except subprocess.CalledProcessError as e:
-    print "\nUnknown error when trying to figure out the clang version\n"
+    print("\nUnknown error when trying to figure out the clang version\n")
     raise e
 
 try:
     clang_bindings_version = known_clang_versions.find_le(V(clang_version))
 except ValueError as e:
-    print "No bindings found for clang version %s" % clang_version
+    print("No bindings found for clang version %s" % clang_version)
     raise e
 
 if clang_bindings_version == V('3.7'):

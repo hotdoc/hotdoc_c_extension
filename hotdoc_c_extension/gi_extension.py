@@ -148,7 +148,6 @@ class GIExtension(BaseExtension):
 
         self.__parsed_girs = set()
         self.__node_cache = {}
-        self.__own_symbols = set()
 
         # If generating the index ourselves, we will filter these functions
         # out.
@@ -284,7 +283,7 @@ class GIExtension(BaseExtension):
         self.__smart_filters.add(('%s_%s_GET_CLASS' % (sym_prefixes, sym_prefix)).upper())
         self.__smart_filters.add(('%s_%s_GET_IFACE' % (sym_prefixes, sym_prefix)).upper())
 
-    def __cache_nodes(self, gir_root, own=True):
+    def __cache_nodes(self, gir_root):
         ns_node = gir_root.find('./{%s}namespace' % self.__nsmap['core'])
         id_prefixes = ns_node.attrib['{%s}identifier-prefixes' % self.__nsmap['c']]
         sym_prefixes = ns_node.attrib['{%s}symbol-prefixes' % self.__nsmap['c']]
@@ -294,8 +293,6 @@ class GIExtension(BaseExtension):
                 './/*[@c:identifier]',
                 namespaces=self.__nsmap):
             self.__node_cache[node.attrib[id_key]] = node
-            if own:
-                self.__own_symbols.add(node.attrib[id_key])
 
         id_type = '{%s}type' % self.__nsmap['c']
         class_tag = '{%s}class' % self.__nsmap['core']
@@ -305,8 +302,6 @@ class GIExtension(BaseExtension):
                 namespaces=self.__nsmap):
             name = node.attrib[id_type]
             self.__node_cache[name] = node
-            if own:
-                self.__own_symbols.add(name)
             if node.tag in [class_tag, interface_tag]:
                 gi_name = '.'.join(self.__get_gi_name_components(node))
                 self.__class_nodes[gi_name] = node
@@ -314,8 +309,6 @@ class GIExtension(BaseExtension):
                     self.__nsmap['glib'])
                 self.__get_type_functions.add(get_type_function)
                 self.__node_cache['%s::%s' % (name, name)] = node
-                if own:
-                    self.__own_symbols.add('%s::%s' % (name, name))
                 self.__generate_smart_filters(id_prefixes, sym_prefixes, node)
 
         for node in gir_root.xpath(
@@ -324,8 +317,6 @@ class GIExtension(BaseExtension):
             name = '%s:%s' % (self.__get_klass_name(node.getparent()),
                               node.attrib['name'])
             self.__node_cache[name] = node
-            if own:
-                self.__own_symbols.add(name)
 
         for node in gir_root.xpath(
                 './/glib:signal',
@@ -333,8 +324,6 @@ class GIExtension(BaseExtension):
             name = '%s::%s' % (self.__get_klass_name(node.getparent()),
                                node.attrib['name'])
             self.__node_cache[name] = node
-            if own:
-                self.__own_symbols.add(name)
 
         for node in gir_root.xpath(
                 './/core:virtual-method',
@@ -342,8 +331,6 @@ class GIExtension(BaseExtension):
             name = '%s:::%s' % (self.__get_klass_name(node.getparent()),
                                 node.attrib['name'])
             self.__node_cache[name] = node
-            if own:
-                self.__own_symbols.add(name)
 
         for inc in gir_root.findall('./core:include',
                 namespaces = self.__nsmap):
@@ -361,10 +348,10 @@ class GIExtension(BaseExtension):
 
             self.__parsed_girs.add(gir_file)
             inc_gir_root = etree.parse(gir_file).getroot()
-            self.__cache_nodes(inc_gir_root, own=False)
+            self.__cache_nodes(inc_gir_root)
 
     def __create_hierarchies(self):
-        for gi_name, klass in self.__class_nodes.iteritems():
+        for gi_name, klass in self.__class_nodes.items():
             hierarchy = self.__create_hierarchy (klass)
             self.__gir_hierarchies[gi_name] = hierarchy
 
@@ -407,7 +394,7 @@ class GIExtension(BaseExtension):
     def __gather_gtk_doc_links (self):
         gtkdoc_dir = os.path.join(self.doc_repo.datadir, "gtk-doc", "html")
         if not os.path.exists(gtkdoc_dir):
-            print "no gtk doc to gather links from in %s" % gtkdoc_dir
+            print("no gtk doc to gather links from in %s" % gtkdoc_dir)
             return
 
         for node in os.listdir(gtkdoc_dir):
@@ -531,8 +518,10 @@ class GIExtension(BaseExtension):
         return True
 
     def __translate_link_ref(self, link):
+        page = self.doc_repo.doc_tree.get_page_for_symbol(link.id_)
+
         if self.language is None:
-            if link.ref and link.id_ in self.__own_symbols:
+            if page and page.extension_name == 'gi-extension':
                 return '%s/%s' % (self.languages[0], link.ref)
             return None
 
@@ -540,11 +529,10 @@ class GIExtension(BaseExtension):
         if fund:
             return fund.ref
 
-        if link.ref and link.id_ in self.__own_symbols:
+        if page and page.extension_name == 'gi-extension':
+            if link.ref and self.language != 'c' and not self.__is_introspectable(link.id_):
+                return 'c/' + link.ref
             return '%s/%s' % (self.language, link.ref)
-
-        if link.ref and self.language != 'c' and not self.__is_introspectable(link.id_):
-            return 'c/' + link.ref
 
         if link.ref == None:
             return self.__gtkdoc_hrefs.get(link.id_)

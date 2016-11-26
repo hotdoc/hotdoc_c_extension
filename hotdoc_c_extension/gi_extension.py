@@ -53,7 +53,6 @@ from collections import defaultdict
 from hotdoc.core.symbols import *
 from hotdoc.core.extension import Extension, ExtDependency
 from hotdoc.core.formatter import Formatter
-from hotdoc.core.file_includer import find_md_file
 from hotdoc.core.links import Link, LinkResolver
 from hotdoc.core.tree import Page
 from hotdoc.core.comment import Comment

@@ -22,7 +22,7 @@ from hotdoc_c_extension.clang import cindex
 from ctypes import *
 from fnmatch import fnmatch
 
-from hotdoc.core import file_includer
+from hotdoc.core import inclusions
 from hotdoc.core.extension import Extension
 from hotdoc.core.exceptions import ParsingException, BadInclusionException, HotdocException
 from hotdoc.core.symbols import *
@@ -583,7 +583,7 @@ class CExtension(Extension):
     def __init__(self, project):
         Extension.__init__(self, project)
         self.project = project
-        file_includer.include_signal.connect(self.__include_file_cb)
+        inclusions.include_signal.connect(self.__include_file_cb)
         self.scanner = ClangScanner(self.project, self)
         self.formatters = {'html': CFormatter()}
 

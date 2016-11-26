@@ -23,7 +23,7 @@ from ctypes import *
 from fnmatch import fnmatch
 
 from hotdoc.core import file_includer
-from hotdoc.core.base_extension import BaseExtension
+from hotdoc.core.extension import Extension
 from hotdoc.core.exceptions import ParsingException, BadInclusionException, HotdocException
 from hotdoc.core.symbols import *
 from hotdoc.core.comment_block import comment_from_tag
@@ -575,13 +575,13 @@ Parse C source files to extract comments and symbols.
 """
 
 
-class CExtension(BaseExtension):
+class CExtension(Extension):
     extension_name = 'c-extension'
     argument_prefix = 'c'
     flags = None
 
     def __init__(self, doc_repo):
-        BaseExtension.__init__(self, doc_repo)
+        Extension.__init__(self, doc_repo)
         self.doc_repo = doc_repo
         file_includer.include_signal.connect(self.__include_file_cb)
         self.scanner = ClangScanner(self.doc_repo, self)

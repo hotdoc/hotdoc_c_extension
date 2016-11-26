@@ -51,7 +51,7 @@ from lxml import etree
 from collections import defaultdict
 
 from hotdoc.core.symbols import *
-from hotdoc.core.base_extension import BaseExtension, ExtDependency
+from hotdoc.core.extension import Extension, ExtDependency
 from hotdoc.core.base_formatter import Formatter
 from hotdoc.core.file_includer import find_md_file
 from hotdoc.core.links import Link, LinkResolver
@@ -131,14 +131,14 @@ Must be used in combination with the C extension.
 """
 
 
-class GIExtension(BaseExtension):
+class GIExtension(Extension):
     extension_name = "gi-extension"
     argument_prefix = "gi"
     smart_index = False
     languages = None
 
     def __init__(self, doc_repo):
-        BaseExtension.__init__(self, doc_repo)
+        Extension.__init__(self, doc_repo)
 
         self.language = 'c'
 
@@ -248,7 +248,7 @@ class GIExtension(BaseExtension):
         for l in self.languages:
             page.meta['extra']['gi-language'] = l
             self.setup_language (l)
-            BaseExtension.format_page (self, page, link_resolver, output)
+            Extension.format_page (self, page, link_resolver, output)
 
         self.setup_language(None)
 

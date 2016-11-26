@@ -29,7 +29,7 @@ from hotdoc.core.symbols import *
 from hotdoc.core.comment import comment_from_tag
 from hotdoc.core.links import Link
 
-from hotdoc.parsers.gtk_doc_parser import GtkDocParser
+from hotdoc.parsers.gtk_doc import GtkDocParser
 
 from hotdoc.utils.loggable import (info as core_info, warn, Logger,
     debug as core_debug)

@@ -17,7 +17,7 @@
 # along with this library.  If not, see <http://www.gnu.org/licenses/>.
 
 from hotdoc.core.formatter import Formatter
-from hotdoc.parsers.gtk_doc_parser import GtkDocStringFormatter
+from hotdoc.parsers.gtk_doc import GtkDocStringFormatter
 
 
 class CFormatter(Formatter):

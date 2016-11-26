@@ -55,7 +55,7 @@ from hotdoc.core.extension import Extension, ExtDependency
 from hotdoc.core.formatter import Formatter
 from hotdoc.core.file_includer import find_md_file
 from hotdoc.core.links import Link, LinkResolver
-from hotdoc.core.doc_tree import Page
+from hotdoc.core.tree import Page
 from hotdoc.core.comment_block import Comment
 from hotdoc.core.exceptions import BadInclusionException
 from hotdoc.utils.loggable import warn, Logger
@@ -518,7 +518,7 @@ class GIExtension(Extension):
         return True
 
     def __translate_link_ref(self, link):
-        page = self.project.doc_tree.get_page_for_symbol(link.id_)
+        page = self.project.tree.get_page_for_symbol(link.id_)
 
         if self.language is None:
             if page and page.extension_name == 'gi-extension':
@@ -572,7 +572,7 @@ class GIExtension(Extension):
 
         """
         try:
-            self.project.doc_tree.page_parser.renaming_page_link_signal.disconnect(
+            self.project.tree.page_parser.renaming_page_link_signal.disconnect(
                     self.__rename_page_link)
         except KeyError:
             pass
@@ -581,7 +581,7 @@ class GIExtension(Extension):
         if language is not None:
             Link.resolving_title_signal.connect(self.__translate_link_title)
             """
-            self.project.doc_tree.page_parser.renaming_page_link_signal.connect(
+            self.project.tree.page_parser.renaming_page_link_signal.connect(
                     self.__rename_page_link)
             """
 

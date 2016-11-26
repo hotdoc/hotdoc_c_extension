@@ -17,18 +17,18 @@
 # along with this library.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
-from hotdoc.formatters.html_formatter import HtmlFormatter
+from hotdoc.core.base_formatter import Formatter
 from hotdoc.core.symbols import *
 import lxml.etree
 
 
-class GIHtmlFormatter(HtmlFormatter):
+class GIFormatter(Formatter):
     def __init__(self, gi_extension, link_resolver):
         module_path = os.path.dirname(__file__)
         searchpath = [os.path.join(module_path, "templates")]
         self.__gi_extension = gi_extension
         self.__link_resolver = link_resolver
-        HtmlFormatter.__init__(self, searchpath)
+        Formatter.__init__(self, searchpath)
 
     def format_annotations (self, annotations):
         template = self.engine.get_template('gi_annotations.html')
@@ -46,8 +46,8 @@ class GIHtmlFormatter(HtmlFormatter):
                 # FIXME : shouldn't we rather QualifiedSymbol.get_type_link() ?
                 if tok not in ['*', 'const ', 'restrict ', 'volatile ']:
                     new_tokens.append (tok)
-            return HtmlFormatter._format_type_tokens (self, new_tokens)
-        return HtmlFormatter._format_type_tokens (self, type_tokens)
+            return Formatter._format_type_tokens (self, new_tokens)
+        return Formatter._format_type_tokens (self, type_tokens)
 
     def _format_return_value_symbol (self, retval):
         is_void = retval[0] is None or \
@@ -62,7 +62,7 @@ class GIHtmlFormatter(HtmlFormatter):
         elif is_void:
             retval = retval[1:] or [None]
 
-        return HtmlFormatter._format_return_value_symbol (self, retval)
+        return Formatter._format_return_value_symbol (self, retval)
 
     def _format_parameter_symbol (self, parameter):
         if self.__gi_extension.language != 'c':
@@ -77,23 +77,23 @@ class GIHtmlFormatter(HtmlFormatter):
         else:
             parameter.extension_contents.pop('type-link', None)
 
-        res = HtmlFormatter._format_parameter_symbol (self, parameter)
+        res = Formatter._format_parameter_symbol (self, parameter)
         return res
 
     def _format_linked_symbol (self, symbol):
         if self.__gi_extension.language == 'c':
-            res = HtmlFormatter._format_linked_symbol (self, symbol)
+            res = Formatter._format_linked_symbol (self, symbol)
             if symbol == None:
                 res = 'void'
             return res
 
         if not isinstance (symbol, QualifiedSymbol):
-            return HtmlFormatter._format_linked_symbol (self, symbol)
+            return Formatter._format_linked_symbol (self, symbol)
 
         gi_name = symbol.get_extension_attribute ('gi-extension', 'gi_name')
 
         if gi_name is None:
-            return HtmlFormatter._format_linked_symbol (self, symbol)
+            return Formatter._format_linked_symbol (self, symbol)
 
         fund = self.__gi_extension._fundamentals.get(gi_name)
         if fund:
@@ -105,13 +105,13 @@ class GIHtmlFormatter(HtmlFormatter):
 
     def _format_prototype (self, function, is_pointer, title):
         if self.__gi_extension.language == 'c':
-            return HtmlFormatter._format_prototype (self, function,
+            return Formatter._format_prototype (self, function,
                     is_pointer, title)
 
         params = function.get_extension_attribute ('gi-extension', 'parameters')
 
         if params is None:
-            return HtmlFormatter._format_prototype (self, function,
+            return Formatter._format_prototype (self, function,
                     is_pointer, title)
 
         c_name = function._make_name()
@@ -150,7 +150,7 @@ class GIHtmlFormatter(HtmlFormatter):
 
     def _format_struct (self, struct):
         if self.__gi_extension.language == 'c':
-            return HtmlFormatter._format_struct (self, struct)
+            return Formatter._format_struct (self, struct)
         members_list = self._format_members_list (struct.members, 'Attributes')
 
         template = self.engine.get_template ("python_compound.html")
@@ -160,7 +160,7 @@ class GIHtmlFormatter(HtmlFormatter):
 
     def _format_constant(self, constant):
         if self.__gi_extension.language == 'c':
-            return HtmlFormatter._format_constant (self, constant)
+            return Formatter._format_constant (self, constant)
 
         template = self.engine.get_template('constant.html')
         out = template.render ({'symbol': constant,
@@ -186,7 +186,7 @@ class GIHtmlFormatter(HtmlFormatter):
         return out
 
     def get_output_folder(self):
-        return os.path.join(super(GIHtmlFormatter, self).get_output_folder(),
+        return os.path.join(super(GIFormatter, self).get_output_folder(),
             self.__gi_extension.language)
 
     def _get_assets_path(self):

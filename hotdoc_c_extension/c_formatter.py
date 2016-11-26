@@ -16,13 +16,13 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this library.  If not, see <http://www.gnu.org/licenses/>.
 
-from hotdoc.formatters.html_formatter import HtmlFormatter
+from hotdoc.core.base_formatter import Formatter
 from hotdoc.parsers.gtk_doc_parser import GtkDocStringFormatter
 
 
-class CHtmlFormatter(HtmlFormatter):
+class CFormatter(Formatter):
     def __init__(self):
-        HtmlFormatter.__init__(self, [])
+        Formatter.__init__(self, [])
         self._docstring_formatter = GtkDocStringFormatter()
 
     def _format_comment(self, comment, link_resolver):

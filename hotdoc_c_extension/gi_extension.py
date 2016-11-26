@@ -39,7 +39,7 @@ virtual methods attached to this class are added too.
 
 We will also update all the callables at resolution time,
 to add gi-specific attributes to them, which the
-GIHtmlFormatter will make sense of at format-time.
+GIFormatter will make sense of at format-time.
 
 This approach allows incremental rebuilding to be way faster
 than the initial build.
@@ -60,7 +60,7 @@ from hotdoc.core.comment_block import Comment
 from hotdoc.core.exceptions import BadInclusionException
 from hotdoc.utils.loggable import warn, Logger
 
-from .gi_html_formatter import GIHtmlFormatter
+from .gi_formatter import GIFormatter
 from .gi_annotation_parser import GIAnnotationParser
 from .fundamentals import PY_FUNDAMENTALS, JS_FUNDAMENTALS
 
@@ -176,7 +176,7 @@ class GIExtension(BaseExtension):
 
         self.__annotation_parser = GIAnnotationParser()
 
-        self.formatters["html"] = GIHtmlFormatter(self,
+        self.formatters["html"] = GIFormatter(self,
                 self.doc_repo.link_resolver)
 
         self.__translated_names = {}

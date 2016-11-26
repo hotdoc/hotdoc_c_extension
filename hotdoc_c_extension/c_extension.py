@@ -35,7 +35,7 @@ from hotdoc.utils.loggable import (info as core_info, warn, Logger,
     debug as core_debug)
 
 from .c_comment_scanner.c_comment_scanner import get_comments
-from .c_html_formatter import CHtmlFormatter
+from .c_formatter import CFormatter
 
 def ast_node_is_function_pointer (ast_node):
     if ast_node.kind == cindex.TypeKind.POINTER and \
@@ -585,7 +585,7 @@ class CExtension(BaseExtension):
         self.doc_repo = doc_repo
         file_includer.include_signal.connect(self.__include_file_cb)
         self.scanner = ClangScanner(self.doc_repo, self)
-        self.formatters = {'html': CHtmlFormatter()}
+        self.formatters = {'html': CFormatter()}
 
     # pylint: disable=no-self-use
     def __include_file_cb(self, include_path, line_ranges, symbol_name):

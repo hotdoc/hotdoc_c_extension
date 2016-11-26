@@ -26,7 +26,7 @@ from hotdoc.core import file_includer
 from hotdoc.core.extension import Extension
 from hotdoc.core.exceptions import ParsingException, BadInclusionException, HotdocException
 from hotdoc.core.symbols import *
-from hotdoc.core.comment_block import comment_from_tag
+from hotdoc.core.comment import comment_from_tag
 from hotdoc.core.links import Link
 
 from hotdoc.parsers.gtk_doc_parser import GtkDocParser

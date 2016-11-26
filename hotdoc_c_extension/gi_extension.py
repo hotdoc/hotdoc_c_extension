@@ -56,7 +56,7 @@ from hotdoc.core.formatter import Formatter
 from hotdoc.core.file_includer import find_md_file
 from hotdoc.core.links import Link, LinkResolver
 from hotdoc.core.tree import Page
-from hotdoc.core.comment_block import Comment
+from hotdoc.core.comment import Comment
 from hotdoc.core.exceptions import BadInclusionException
 from hotdoc.utils.loggable import warn, Logger
 

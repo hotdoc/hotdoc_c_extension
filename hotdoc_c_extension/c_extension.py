@@ -85,7 +85,7 @@ def get_clang_libdir():
     return subprocess.check_output(['llvm-config', '--libdir']).strip().decode()
 
 class ClangScanner(object):
-    def __init__(self, doc_repo, doc_db):
+    def __init__(self, project, doc_db):
         if not cindex.Config.loaded:
             # Let's try and find clang ourselves first
             clang_libdir = get_clang_libdir()
@@ -93,8 +93,8 @@ class ClangScanner(object):
                 cindex.Config.set_library_path(clang_libdir)
             cindex.Config.set_compatibility_check(False)
 
-        self.__raw_comment_parser = GtkDocParser(doc_repo)
-        self.doc_repo = doc_repo
+        self.__raw_comment_parser = GtkDocParser(project)
+        self.project = project
         self.__doc_db = doc_db
 
     def scan(self, filenames, options, incremental, full_scan,
@@ -150,9 +150,9 @@ class ClangScanner(object):
                     for c in cs:
                         if c[4]:
                             block = self.__raw_comment_parser.parse_comment(c[0],
-                                c[1], c[2], c[3], self.doc_repo.include_paths)
+                                c[1], c[2], c[3], self.project.include_paths)
                             if block is not None:
-                                self.doc_repo.database.add_comment(block)
+                                self.project.database.add_comment(block)
                         elif not skip_next_symbol:
                             if filename.endswith('.h'):
                                 self.__create_macro_from_raw_text(c)
@@ -490,7 +490,7 @@ class ClangScanner(object):
         return self.__create_constant_symbol(stripped_name, raw[1], raw[2], raw[0])
 
     def __create_function_macro_symbol (self, name, filename, lineno, original_text):
-        comment = self.doc_repo.database.get_comment(name)
+        comment = self.project.database.get_comment(name)
 
         return_value = [None]
         if comment:
@@ -580,11 +580,11 @@ class CExtension(Extension):
     argument_prefix = 'c'
     flags = None
 
-    def __init__(self, doc_repo):
-        Extension.__init__(self, doc_repo)
-        self.doc_repo = doc_repo
+    def __init__(self, project):
+        Extension.__init__(self, project)
+        self.project = project
         file_includer.include_signal.connect(self.__include_file_cb)
-        self.scanner = ClangScanner(self.doc_repo, self)
+        self.scanner = ClangScanner(self.project, self)
         self.formatters = {'html': CFormatter()}
 
     # pylint: disable=no-self-use
@@ -594,15 +594,15 @@ class CExtension(Extension):
 
         if not line_ranges:
             line_ranges = [(1, -1)]
-        symbol = self.doc_repo.database.get_symbol(symbol_name)
+        symbol = self.project.database.get_symbol(symbol_name)
         if symbol and symbol.filename != include_path:
             symbol = None
 
         if not symbol:
-            scanner = ClangScanner(self.doc_repo, self)
+            scanner = ClangScanner(self.project, self)
             scanner.scan([include_path], CExtension.flags,
-                         self.doc_repo.incremental, True, ['*.c', '*.h'])
-            symbol = self.doc_repo.database.get_symbol(symbol_name)
+                         self.project.incremental, True, ['*.c', '*.h'])
+            symbol = self.project.database.get_symbol(symbol_name)
 
             if not symbol:
                 warn('bad-c-inclusion',
@@ -639,7 +639,7 @@ class CExtension(Extension):
     def setup(self):
         stale, unlisted = self.get_stale_files(CExtension.sources)
         self.scanner.scan(stale, CExtension.flags,
-                          self.doc_repo.incremental, False, ['*.h'])
+                          self.project.incremental, False, ['*.h'])
 
     @staticmethod
     def add_arguments (parser):
@@ -654,8 +654,8 @@ class CExtension(Extension):
                 dest="extra_c_flags", help="Extra C flags (-D, -U, ..)")
 
     @staticmethod
-    def parse_config(doc_repo, config):
+    def parse_config(project, config):
         CExtension.parse_standard_config(config)
-        CExtension.flags = flags_from_config(config, doc_repo)
+        CExtension.flags = flags_from_config(config, project)
         for dir_ in CExtension.include_directories:
             CExtension.flags.append('-I%s' % dir_)

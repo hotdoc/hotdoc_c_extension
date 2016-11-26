@@ -137,8 +137,8 @@ class GIExtension(Extension):
     smart_index = False
     languages = None
 
-    def __init__(self, doc_repo):
-        Extension.__init__(self, doc_repo)
+    def __init__(self, project):
+        Extension.__init__(self, project)
 
         self.language = 'c'
 
@@ -177,7 +177,7 @@ class GIExtension(Extension):
         self.__annotation_parser = GIAnnotationParser()
 
         self.formatters["html"] = GIFormatter(self,
-                self.doc_repo.link_resolver)
+                self.project.link_resolver)
 
         self.__translated_names = {}
         self.__gtkdoc_hrefs = {}
@@ -188,7 +188,7 @@ class GIExtension(Extension):
 
         if GIExtension.sources:
             from hotdoc_c_extension.c_extension import ClangScanner
-            c_extension = doc_repo.extensions.get('c-extension')
+            c_extension = project.extensions.get('c-extension')
             c_extension.scanner.set_extension(self)
 
         self.__maybe_generate_index()
@@ -205,7 +205,7 @@ class GIExtension(Extension):
                      "javascript), default is to make all languages")
 
     @staticmethod
-    def parse_config(doc_repo, config):
+    def parse_config(project, config):
         GIExtension.parse_standard_config(config)
         GIExtension.languages = [l.lower() for l in config.get(
             'languages', [])]
@@ -266,7 +266,7 @@ class GIExtension(Extension):
 
         xdg_dirs = os.getenv('XDG_DATA_DIRS') or ''
         xdg_dirs = [p for p in xdg_dirs.split(':') if p]
-        xdg_dirs.append(self.doc_repo.datadir)
+        xdg_dirs.append(self.project.datadir)
         for dir_ in xdg_dirs:
             gir_file = os.path.join(dir_, 'gir-1.0', gir_name)
             if os.path.exists(gir_file):
@@ -392,7 +392,7 @@ class GIExtension(Extension):
         return hierarchy
 
     def __gather_gtk_doc_links (self):
-        gtkdoc_dir = os.path.join(self.doc_repo.datadir, "gtk-doc", "html")
+        gtkdoc_dir = os.path.join(self.project.datadir, "gtk-doc", "html")
         if not os.path.exists(gtkdoc_dir):
             print("no gtk doc to gather links from in %s" % gtkdoc_dir)
             return
@@ -518,7 +518,7 @@ class GIExtension(Extension):
         return True
 
     def __translate_link_ref(self, link):
-        page = self.doc_repo.doc_tree.get_page_for_symbol(link.id_)
+        page = self.project.doc_tree.get_page_for_symbol(link.id_)
 
         if self.language is None:
             if page and page.extension_name == 'gi-extension':
@@ -572,7 +572,7 @@ class GIExtension(Extension):
 
         """
         try:
-            self.doc_repo.doc_tree.page_parser.renaming_page_link_signal.disconnect(
+            self.project.doc_tree.page_parser.renaming_page_link_signal.disconnect(
                     self.__rename_page_link)
         except KeyError:
             pass
@@ -581,7 +581,7 @@ class GIExtension(Extension):
         if language is not None:
             Link.resolving_title_signal.connect(self.__translate_link_title)
             """
-            self.doc_repo.doc_tree.page_parser.renaming_page_link_signal.connect(
+            self.project.doc_tree.page_parser.renaming_page_link_signal.connect(
                     self.__rename_page_link)
             """
 
@@ -835,7 +835,7 @@ class GIExtension(Extension):
             flags.append (NoHooksFlag())
 
         # This is incorrect, it's not yet format time
-        extra_content = self.get_formatter(self.doc_repo.output_format)._format_flags (flags)
+        extra_content = self.get_formatter(self.project.output_format)._format_flags (flags)
         res.extension_contents['Flags'] = extra_content
 
         self.__sort_parameters (res, retval, parameters)
@@ -867,7 +867,7 @@ class GIExtension(Extension):
                 prop_type=type_,
                 display_name=name, unique_name=unique_name)
 
-        extra_content = self.get_formatter(self.doc_repo.output_format)._format_flags (flags)
+        extra_content = self.get_formatter(self.project.output_format)._format_flags (flags)
         res.extension_contents['Flags'] = extra_content
 
         return res
@@ -996,7 +996,7 @@ class GIExtension(Extension):
         parent_comment = None
         if class_struct_name:
             class_struct_name = '%s%s' % (components[0], class_struct_name)
-            parent_comment = self.doc_repo.database.get_comment(class_struct_name)
+            parent_comment = self.project.database.get_comment(class_struct_name)
 
         vmethods = node.findall('./core:virtual-method',
                                 namespaces = self.__nsmap)
@@ -1013,7 +1013,7 @@ class GIExtension(Extension):
                     block = Comment (name=sym.unique_name,
                                      description=comment.description,
                                      filename=parent_comment.filename)
-                    self.doc_repo.database.add_comment(block)
+                    self.project.database.add_comment(block)
 
         return symbols
 

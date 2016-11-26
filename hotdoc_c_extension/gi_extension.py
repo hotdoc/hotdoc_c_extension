@@ -996,7 +996,7 @@ class GIExtension(Extension):
         parent_comment = None
         if class_struct_name:
             class_struct_name = '%s%s' % (components[0], class_struct_name)
-            parent_comment = self.doc_repo.doc_database.get_comment(class_struct_name)
+            parent_comment = self.doc_repo.database.get_comment(class_struct_name)
 
         vmethods = node.findall('./core:virtual-method',
                                 namespaces = self.__nsmap)
@@ -1013,7 +1013,7 @@ class GIExtension(Extension):
                     block = Comment (name=sym.unique_name,
                                      description=comment.description,
                                      filename=parent_comment.filename)
-                    self.doc_repo.doc_database.add_comment(block)
+                    self.doc_repo.database.add_comment(block)
 
         return symbols
 

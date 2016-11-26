@@ -152,7 +152,7 @@ class ClangScanner(object):
                             block = self.__raw_comment_parser.parse_comment(c[0],
                                 c[1], c[2], c[3], self.doc_repo.include_paths)
                             if block is not None:
-                                self.doc_repo.doc_database.add_comment(block)
+                                self.doc_repo.database.add_comment(block)
                         elif not skip_next_symbol:
                             if filename.endswith('.h'):
                                 self.__create_macro_from_raw_text(c)
@@ -490,7 +490,7 @@ class ClangScanner(object):
         return self.__create_constant_symbol(stripped_name, raw[1], raw[2], raw[0])
 
     def __create_function_macro_symbol (self, name, filename, lineno, original_text):
-        comment = self.doc_repo.doc_database.get_comment(name)
+        comment = self.doc_repo.database.get_comment(name)
 
         return_value = [None]
         if comment:
@@ -594,7 +594,7 @@ class CExtension(Extension):
 
         if not line_ranges:
             line_ranges = [(1, -1)]
-        symbol = self.doc_repo.doc_database.get_symbol(symbol_name)
+        symbol = self.doc_repo.database.get_symbol(symbol_name)
         if symbol and symbol.filename != include_path:
             symbol = None
 
@@ -602,7 +602,7 @@ class CExtension(Extension):
             scanner = ClangScanner(self.doc_repo, self)
             scanner.scan([include_path], CExtension.flags,
                          self.doc_repo.incremental, True, ['*.c', '*.h'])
-            symbol = self.doc_repo.doc_database.get_symbol(symbol_name)
+            symbol = self.doc_repo.database.get_symbol(symbol_name)
 
             if not symbol:
                 warn('bad-c-inclusion',

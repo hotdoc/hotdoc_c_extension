@@ -16,7 +16,7 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this library.  If not, see <http://www.gnu.org/licenses/>.
 
-from hotdoc.core.base_formatter import Formatter
+from hotdoc.core.formatter import Formatter
 from hotdoc.parsers.gtk_doc_parser import GtkDocStringFormatter
 
 

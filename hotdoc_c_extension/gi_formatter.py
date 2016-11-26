@@ -17,7 +17,7 @@
 # along with this library.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
-from hotdoc.core.base_formatter import Formatter
+from hotdoc.core.formatter import Formatter
 from hotdoc.core.symbols import *
 import lxml.etree
 

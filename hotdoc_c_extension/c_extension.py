@@ -18,6 +18,8 @@
 
 import os, sys, linecache, pkgconfig, glob, subprocess
 
+import cchardet
+
 from hotdoc_c_extension.clang import cindex
 from ctypes import *
 from fnmatch import fnmatch
@@ -34,7 +36,7 @@ from hotdoc.parsers.gtk_doc import GtkDocParser
 from hotdoc.utils.loggable import (info as core_info, warn, Logger,
     debug as core_debug)
 
-from .c_comment_scanner.c_comment_scanner import get_comments
+from .c_comment_scanner.c_comment_scanner import extract_comments
 from .c_formatter import CFormatter
 
 def ast_node_is_function_pointer (ast_node):
@@ -52,6 +54,10 @@ def info(message):
 def debug(message):
     core_debug(message, domain='c-extension')
 
+
+def unicode_dammit(data):
+    encoding = cchardet.detect(data)['encoding']
+    return data.decode(encoding, errors='replace')
 
 Logger.register_warning_code('clang-diagnostic', ParsingException,
                              'c-extension')
@@ -143,19 +149,23 @@ class ClangScanner(object):
 
         if not full_scan:
             for filename in filenames:
-                with open (filename, 'r') as f:
+                with open (filename, 'rb') as f:
                     skip_next_symbol = filename in header_guarded
                     debug('Getting comments in %s' % filename)
-                    cs = get_comments (filename)
+                    lines = [unicode_dammit(l) for l in f.readlines()]
+                    cs = extract_comments (''.join(lines))
                     for c in cs:
-                        if c[4]:
-                            block = self.__raw_comment_parser.parse_comment(c[0],
-                                c[1], c[2], c[3], self.project.include_paths)
+                        if c[3]:
+                            line = lines[c[1] - 1]
+
+                            comment = (len(line) - len(line.lstrip(' '))) * ' ' + c[0]
+                            block = self.__raw_comment_parser.parse_comment(comment,
+                                filename, c[1], c[2], self.project.include_paths)
                             if block is not None:
                                 self.project.database.add_comment(block)
                         elif not skip_next_symbol:
                             if filename.endswith('.h'):
-                                self.__create_macro_from_raw_text(c)
+                                self.__create_macro_from_raw_text(c, filename)
                         else:
                             skip_next_symbol = False
 
@@ -473,7 +483,7 @@ class ClangScanner(object):
 
         return sym
 
-    def __create_macro_from_raw_text(self, raw):
+    def __create_macro_from_raw_text(self, raw, filename):
         mcontent = raw[0].replace('\t', ' ')
         mcontent = mcontent.split(' ', 1)[1]
         split = mcontent.split('(', 1)
@@ -483,11 +493,11 @@ class ClangScanner(object):
             if args:
                 stripped_name = name.strip()
                 return self.__create_function_macro_symbol(stripped_name,
-                    raw[1], raw[2], raw[0])
+                    filename, raw[1], raw[0])
 
         name = mcontent.split(' ', 1)[0]
         stripped_name = name.strip()
-        return self.__create_constant_symbol(stripped_name, raw[1], raw[2], raw[0])
+        return self.__create_constant_symbol(stripped_name, filename, raw[1], raw[0])
 
     def __create_function_macro_symbol (self, name, filename, lineno, original_text):
         comment = self.project.database.get_comment(name)

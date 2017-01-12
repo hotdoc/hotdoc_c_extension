@@ -33,23 +33,26 @@ static struct module_state _state;
 #endif
 
 static PyObject *
-scanner_get_comments (PyObject *self, PyObject *args)
+scanner_extract_comments (PyObject *self, PyObject *args)
 {
-  const char *filename;
+  PyObject *input;
+  char *utf8;
   PyObject *list;
 
-  if (!PyArg_ParseTuple(args, "s", &filename))
+  if (!PyArg_ParseTuple(args, "O!", &PyUnicode_Type, &input))
     return NULL;
 
+  utf8 = PyUnicode_AsUTF8(input);
+
   list = PyList_New (0);
-  scan_filename (filename, list);
+  scan_comments (utf8, list);
 
   Py_INCREF (list);
   return list;
 }
 
 static PyMethodDef scanner_methods[] = {
-  {"get_comments",  scanner_get_comments, METH_VARARGS, "Get comments from a filename."},
+  {"extract_comments",  scanner_extract_comments, METH_VARARGS, "Extract comments from string."},
   {NULL, NULL, 0, NULL}
 };
 

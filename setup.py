@@ -104,5 +104,6 @@ setup(
     ext_modules = [c_comment_scanner_module],
     install_requires = [
         'pkgconfig==1.1.0',
+        'cchardet',
     ]
 )

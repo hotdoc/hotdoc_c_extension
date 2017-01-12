@@ -32,7 +32,6 @@
 
 #include <Python.h>
 
-int
-scan_filename (const char *filename, PyObject *comments);
+int scan_comments (const char *contents, PyObject *comments);
 
 #endif

@@ -31,8 +31,8 @@
 %{
 #include "scanner.h"
 
-extern int yylex (PyObject *comments, const char *filename);
-#define YY_DECL int yylex (PyObject *comments, const char *filename)
+extern int yylex (PyObject *comments);
+#define YY_DECL int yylex (PyObject *comments)
 static int yywrap (void);
 static void parse_comment ();
 static void parse_define ();
@@ -46,8 +46,8 @@ SPACE   [ \t]
 
 %%
 
-"/*"                            { parse_comment (comments, filename); }
-{HASH}{SPACE}*"define"{SPACE}*  { parse_define (comments, filename); }
+"/*"                            { parse_comment (comments); }
+{HASH}{SPACE}*"define"{SPACE}*  { parse_define (comments); }
 
 .|\n		  { }
 
@@ -77,7 +77,7 @@ realloc_and_concat(char *str, char *s2)
 #define BUFSIZE 1024
 
 static void
-parse_define (PyObject *comments, const char *filename)
+parse_define (PyObject *comments)
 {
   int c = input();
   int include_next_line = 0;
@@ -110,9 +110,8 @@ parse_define (PyObject *comments, const char *filename)
   buf[cursor] = 0;
   define = realloc_and_concat (define, buf);
 
-  PyObject *item = Py_BuildValue ("(ssiii)",
+  PyObject *item = Py_BuildValue ("(siii)",
         define,
-        strdup(filename), /* Sic .. */
         define_lineno,
         yylineno,
         0);
@@ -120,7 +119,7 @@ parse_define (PyObject *comments, const char *filename)
 }
 
 static void
-parse_comment (PyObject *comments, const char *filename)
+parse_comment (PyObject *comments)
 {
   int c1, c2;
   int comment_lineno;
@@ -156,8 +155,7 @@ parse_comment (PyObject *comments, const char *filename)
     comment = realloc_and_concat (comment, buf);
     comment = realloc_and_concat (comment, "*/");
 
-    PyObject *item = Py_BuildValue ("(ssiii)", comment,
-        strdup(filename), /* Sic .. */
+    PyObject *item = Py_BuildValue ("(siii)", comment,
         comment_lineno,
         yylineno,
         1);
@@ -174,14 +172,13 @@ parse_comment (PyObject *comments, const char *filename)
 }
 
 int
-scan_filename (const char *filename, PyObject *comments)
+scan_comments (const char *contents, PyObject *comments)
 {
   yylineno = 1;
-  yyin = fopen (filename, "r");
 
-  yylex (comments, filename);
+  yy_scan_string(contents);
 
-  fclose (yyin);
+  yylex (comments);
 
   return 0;
 }

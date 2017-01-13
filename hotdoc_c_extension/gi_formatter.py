@@ -189,9 +189,6 @@ class GIFormatter(Formatter):
         return os.path.join(super(GIFormatter, self).get_output_folder(),
             self.__gi_extension.language)
 
-    def _get_assets_path(self):
-        return os.path.join('..', 'assets')
-
     def patch_page(self, page, symbol, output):
         symbol.update_children_comments()
         for l in self.__gi_extension.languages:

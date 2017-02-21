@@ -46,6 +46,7 @@ than the initial build.
 """
 
 import os
+import pathlib
 
 from lxml import etree
 from collections import defaultdict
@@ -133,12 +134,11 @@ Must be used in combination with the C extension.
 class GIExtension(Extension):
     extension_name = "gi-extension"
     argument_prefix = "gi"
-    smart_index = False
-    languages = None
 
-    def __init__(self, project):
-        Extension.__init__(self, project)
+    def __init__(self, app, project):
+        Extension.__init__(self, app, project)
 
+        self.languages = None
         self.language = 'c'
 
         self.__nsmap = {'core': 'http://www.gtk.org/introspection/core/1.0',
@@ -161,22 +161,14 @@ class GIExtension(Extension):
 
         self.__smart_filters = set()
 
-        for gir_file in GIExtension.sources:
-            gir_root = etree.parse(gir_file).getroot()
-            self.__cache_nodes(gir_root)
-
         self.__gir_hierarchies = {}
         self.__gir_children_map = defaultdict(dict)
-        self.__create_hierarchies()
 
         self.__c_names = {}
         self.__python_names = {}
         self.__javascript_names = {}
 
         self.__annotation_parser = GIAnnotationParser()
-
-        self.formatters["html"] = GIFormatter(self,
-                self.project.link_resolver)
 
         self.__translated_names = {}
         self.__gtkdoc_hrefs = {}
@@ -185,12 +177,7 @@ class GIExtension(Extension):
 
         self.__gen_index_path = None
 
-        if GIExtension.sources:
-            from hotdoc_c_extension.c_extension import ClangScanner
-            c_extension = project.extensions.get('c-extension')
-            c_extension.scanner.set_extension(self)
-
-        self.__maybe_generate_index()
+        self.c_extension = project.extensions.get('c-extension')
 
     @staticmethod
     def add_arguments (parser):
@@ -203,46 +190,50 @@ class GIExtension(Extension):
                 help="Languages to translate documentation in (c, python,"
                      "javascript), default is to make all languages")
 
-    @staticmethod
-    def parse_config(project, config):
-        GIExtension.parse_standard_config(config)
-        GIExtension.languages = [l.lower() for l in config.get(
+    def parse_config(self, config):
+        super(GIExtension, self).parse_config(config)
+        self.languages = [l.lower() for l in config.get(
             'languages', [])]
         # Make sure C always gets formatted first
-        if 'c' in GIExtension.languages:
-            GIExtension.languages.remove ('c')
-            GIExtension.languages.insert (0, 'c')
-        if not GIExtension.languages:
-            GIExtension.languages = ['c', 'python', 'javascript']
+        if 'c' in self.languages:
+            self.languages.remove ('c')
+            self.languages.insert (0, 'c')
+        if not self.languages:
+            self.languages = ['c', 'python', 'javascript']
+        if self.sources:
+            self.c_extension.scanner.set_extension(self)
+        for gir_file in self.sources:
+            gir_root = etree.parse(gir_file).getroot()
+            self.__cache_nodes(gir_root)
+        self.__create_hierarchies()
 
     @staticmethod
     def get_dependencies ():
         return [ExtDependency('c-extension', is_upstream=True)]
 
+    def _make_formatter(self):
+        return GIFormatter(self, self.app.link_resolver)
+
     def _get_smart_index_title(self):
         return 'GObject API Reference'
 
-    def _get_user_index_path(self):
-        return GIExtension.index
-
     def _get_all_sources(self):
-        from hotdoc_c_extension.c_extension import CExtension
-        headers = [s for s in CExtension.sources if s.endswith('.h')]
+        headers = [s for s in self.c_extension.sources if s.endswith('.h')]
         return headers
 
     def setup (self):
-        if not GIExtension.sources:
+        super(GIExtension, self).setup()
+        if not self.sources:
             return
 
         self.info('Gathering legacy gtk-doc links')
         self.__gather_gtk_doc_links()
-        Page.resolving_symbol_signal.connect (self.__resolving_symbol)
-        Link.resolving_link_signal.connect(self.__translate_link_ref)
+        self.project.tree.resolving_symbol_signal.connect (self.__resolving_symbol)
+        self.app.link_resolver.resolving_link_signal.connect(self.__translate_link_ref)
 
     def format_page(self, page, link_resolver, output):
-        LinkResolver.get_link_signal.connect(self.__search_legacy_links)
-        Formatter.formatting_symbol_signal.connect(self.__formatting_symbol)
-        formatter = self.get_formatter('html')
+        link_resolver.get_link_signal.connect(self.__search_legacy_links)
+        self.c_extension.formatter.formatting_symbol_signal.connect(self.__formatting_symbol)
         page.meta['extra']['gi-languages'] = ','.join(self.languages)
         for l in self.languages:
             page.meta['extra']['gi-language'] = l
@@ -251,12 +242,8 @@ class GIExtension(Extension):
 
         self.setup_language(None)
 
-        LinkResolver.get_link_signal.disconnect(self.__search_legacy_links)
-        Formatter.formatting_symbol_signal.disconnect(self.__formatting_symbol)
-
-    def __maybe_generate_index(self):
-        if not GIExtension.sources:
-            return
+        link_resolver.get_link_signal.disconnect(self.__search_legacy_links)
+        self.c_extension.formatter.formatting_symbol_signal.disconnect(self.__formatting_symbol)
 
     def __find_gir_file(self, gir_name):
         for source in self.sources:
@@ -516,12 +503,16 @@ class GIExtension(Extension):
 
         return True
 
+    def insert_language(self, ref, language):
+        p = pathlib.Path(ref)
+        return str(pathlib.Path(p.parts[0], language, *p.parts[1:]))
+
     def __translate_link_ref(self, link):
         page = self.project.tree.get_page_for_symbol(link.id_)
 
         if self.language is None:
             if page and page.extension_name == 'gi-extension':
-                return '%s/%s' % (self.languages[0], link.ref)
+                return self.insert_language(link.ref, self.languages[0])
             return None
 
         fund = self._fundamentals.get(link.id_)
@@ -530,8 +521,8 @@ class GIExtension(Extension):
 
         if page and page.extension_name == 'gi-extension':
             if link.ref and self.language != 'c' and not self.__is_introspectable(link.id_):
-                return 'c/' + link.ref
-            return '%s/%s' % (self.language, link.ref)
+                return self.insert_language(link.ref, 'c')
+            return self.insert_language(link.ref, self.language)
 
         if link.ref == None:
             return self.__gtkdoc_hrefs.get(link.id_)
@@ -641,8 +632,9 @@ class GIExtension(Extension):
     # We implement filtering of some symbols
     def get_or_create_symbol(self, *args, **kwargs):
         kwargs['language'] = 'c'
-        if GIExtension.smart_index:
-            return self.__smart_filter(*args, **kwargs)
+        if self.smart_index:
+            res = self.__smart_filter(*args, **kwargs)
+            return res
         return super(GIExtension, self).get_or_create_symbol(*args, **kwargs)
 
     def __unnest_type (self, parameter):
@@ -834,7 +826,7 @@ class GIExtension(Extension):
             flags.append (NoHooksFlag())
 
         # This is incorrect, it's not yet format time
-        extra_content = self.get_formatter(self.project.output_format)._format_flags (flags)
+        extra_content = self.formatter._format_flags (flags)
         res.extension_contents['Flags'] = extra_content
 
         self.__sort_parameters (res, retval, parameters)
@@ -866,7 +858,7 @@ class GIExtension(Extension):
                 prop_type=type_,
                 display_name=name, unique_name=unique_name)
 
-        extra_content = self.get_formatter(self.project.output_format)._format_flags (flags)
+        extra_content = self.formatter._format_flags (flags)
         res.extension_contents['Flags'] = extra_content
 
         return res
@@ -995,7 +987,7 @@ class GIExtension(Extension):
         parent_comment = None
         if class_struct_name:
             class_struct_name = '%s%s' % (components[0], class_struct_name)
-            parent_comment = self.project.database.get_comment(class_struct_name)
+            parent_comment = self.app.database.get_comment(class_struct_name)
 
         vmethods = node.findall('./core:virtual-method',
                                 namespaces = self.__nsmap)
@@ -1012,7 +1004,7 @@ class GIExtension(Extension):
                     block = Comment (name=sym.unique_name,
                                      description=comment.description,
                                      filename=parent_comment.filename)
-                    self.project.database.add_comment(block)
+                    self.app.database.add_comment(block)
 
         return symbols
 

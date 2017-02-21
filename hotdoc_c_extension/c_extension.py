@@ -37,7 +37,6 @@ from hotdoc.utils.loggable import (info as core_info, warn, Logger,
     debug as core_debug)
 
 from .c_comment_scanner.c_comment_scanner import extract_comments
-from .c_formatter import CFormatter
 
 def ast_node_is_function_pointer (ast_node):
     if ast_node.kind == cindex.TypeKind.POINTER and \
@@ -91,7 +90,7 @@ def get_clang_libdir():
     return subprocess.check_output(['llvm-config', '--libdir']).strip().decode()
 
 class ClangScanner(object):
-    def __init__(self, project, doc_db):
+    def __init__(self, app, project, doc_db):
         if not cindex.Config.loaded:
             # Let's try and find clang ourselves first
             clang_libdir = get_clang_libdir()
@@ -99,6 +98,7 @@ class ClangScanner(object):
                 cindex.Config.set_library_path(clang_libdir)
             cindex.Config.set_compatibility_check(False)
 
+        self.app = app
         self.__raw_comment_parser = GtkDocParser(project)
         self.project = project
         self.__doc_db = doc_db
@@ -162,7 +162,7 @@ class ClangScanner(object):
                             block = self.__raw_comment_parser.parse_comment(comment,
                                 filename, c[1], c[2], self.project.include_paths)
                             if block is not None:
-                                self.project.database.add_comment(block)
+                                self.app.database.add_comment(block)
                         elif not skip_next_symbol:
                             if filename.endswith('.h'):
                                 self.__create_macro_from_raw_text(c, filename)
@@ -500,7 +500,7 @@ class ClangScanner(object):
         return self.__create_constant_symbol(stripped_name, filename, raw[1], raw[0])
 
     def __create_function_macro_symbol (self, name, filename, lineno, original_text):
-        comment = self.project.database.get_comment(name)
+        comment = self.app.database.get_comment(name)
 
         return_value = [None]
         if comment:
@@ -567,7 +567,7 @@ class ClangScanner(object):
         return sym
 
 
-def flags_from_config(config, path_resolver):
+def flags_from_config(config):
     flags = []
 
     for package in config.get('pkg_config_packages') or []:
@@ -588,14 +588,16 @@ Parse C source files to extract comments and symbols.
 class CExtension(Extension):
     extension_name = 'c-extension'
     argument_prefix = 'c'
-    flags = None
+    connected = False
 
-    def __init__(self, project):
-        Extension.__init__(self, project)
+    def __init__(self, app, project):
+        Extension.__init__(self, app, project)
         self.project = project
-        inclusions.include_signal.connect(self.__include_file_cb)
-        self.scanner = ClangScanner(self.project, self)
-        self.formatters = {'html': CFormatter()}
+        self.flags = []
+        if not CExtension.connected:
+            inclusions.include_signal.connect(self.__include_file_cb)
+            CExtension.connected = True
+        self.scanner = ClangScanner(self.app, self.project, self)
 
     # pylint: disable=no-self-use
     def __include_file_cb(self, include_path, line_ranges, symbol_name):
@@ -604,15 +606,15 @@ class CExtension(Extension):
 
         if not line_ranges:
             line_ranges = [(1, -1)]
-        symbol = self.project.database.get_symbol(symbol_name)
+        symbol = self.app.database.get_symbol(symbol_name)
         if symbol and symbol.filename != include_path:
             symbol = None
 
         if not symbol:
-            scanner = ClangScanner(self.project, self)
-            scanner.scan([include_path], CExtension.flags,
-                         self.project.incremental, True, ['*.c', '*.h'])
-            symbol = self.project.database.get_symbol(symbol_name)
+            scanner = ClangScanner(self.app, self.project, self)
+            scanner.scan([include_path], self.flags,
+                         self.app.incremental, True, ['*.c', '*.h'])
+            symbol = self.app.database.get_symbol(symbol_name)
 
             if not symbol:
                 warn('bad-c-inclusion',
@@ -647,9 +649,10 @@ class CExtension(Extension):
         return super(CExtension, self).get_or_create_symbol(*args, **kwargs)
 
     def setup(self):
-        stale, unlisted = self.get_stale_files(CExtension.sources)
-        self.scanner.scan(stale, CExtension.flags,
-                          self.project.incremental, False, ['*.h'])
+        super(CExtension, self).setup()
+        stale, unlisted = self.get_stale_files(self.sources)
+        self.scanner.scan(stale, self.flags,
+                          self.app.incremental, False, ['*.h'])
 
     @staticmethod
     def add_arguments (parser):
@@ -663,9 +666,8 @@ class CExtension(Extension):
         group.add_argument ("--extra-c-flags", action="store", nargs="+",
                 dest="extra_c_flags", help="Extra C flags (-D, -U, ..)")
 
-    @staticmethod
-    def parse_config(project, config):
-        CExtension.parse_standard_config(config)
-        CExtension.flags = flags_from_config(config, project)
-        for dir_ in CExtension.include_directories:
-            CExtension.flags.append('-I%s' % dir_)
+    def parse_config(self, config):
+        super(CExtension, self).parse_config(config)
+        self.flags = flags_from_config(config)
+        for dir_ in self.include_directories:
+            self.flags.append('-I%s' % dir_)

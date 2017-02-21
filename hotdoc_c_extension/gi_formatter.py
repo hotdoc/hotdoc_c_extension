@@ -28,7 +28,7 @@ class GIFormatter(Formatter):
         searchpath = [os.path.join(module_path, "templates")]
         self.__gi_extension = gi_extension
         self.__link_resolver = link_resolver
-        Formatter.__init__(self, searchpath)
+        Formatter.__init__(self, link_resolver, searchpath)
 
     def format_annotations (self, annotations):
         template = self.engine.get_template('gi_annotations.html')
@@ -186,8 +186,7 @@ class GIFormatter(Formatter):
         return out
 
     def get_output_folder(self):
-        return os.path.join(super(GIFormatter, self).get_output_folder(),
-            self.__gi_extension.language)
+        return self.__gi_extension.language
 
     def patch_page(self, page, symbol, output):
         symbol.update_children_comments()

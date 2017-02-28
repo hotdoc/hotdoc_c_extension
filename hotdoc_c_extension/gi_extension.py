@@ -212,7 +212,7 @@ class GIExtension(Extension):
         return [ExtDependency('c-extension', is_upstream=True)]
 
     def _make_formatter(self):
-        return GIFormatter(self, self.app.link_resolver)
+        return GIFormatter(self)
 
     def _get_smart_index_title(self):
         return 'GObject API Reference'

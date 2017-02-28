@@ -23,12 +23,10 @@ import lxml.etree
 
 
 class GIFormatter(Formatter):
-    def __init__(self, gi_extension, link_resolver):
+    def __init__(self, gi_extension):
         module_path = os.path.dirname(__file__)
         searchpath = [os.path.join(module_path, "templates")]
-        self.__gi_extension = gi_extension
-        self.__link_resolver = link_resolver
-        Formatter.__init__(self, link_resolver, searchpath)
+        Formatter.__init__(self, gi_extension, searchpath)
 
     def format_annotations (self, annotations):
         template = self.engine.get_template('gi_annotations.html')
@@ -40,7 +38,7 @@ class GIFormatter(Formatter):
         return out
 
     def _format_type_tokens (self, type_tokens):
-        if self.__gi_extension.language != 'c':
+        if self.extension.language != 'c':
             new_tokens = []
             for tok in type_tokens:
                 # FIXME : shouldn't we rather QualifiedSymbol.get_type_link() ?
@@ -54,7 +52,7 @@ class GIFormatter(Formatter):
                 retval[0].get_extension_attribute('gi-extension',
                         'gi_name') == 'none'
 
-        if self.__gi_extension.language == 'c':
+        if self.extension.language == 'c':
             if is_void:
                 retval = [None]
             else:
@@ -65,7 +63,7 @@ class GIFormatter(Formatter):
         return Formatter._format_return_value_symbol (self, retval)
 
     def _format_parameter_symbol (self, parameter):
-        if self.__gi_extension.language != 'c':
+        if self.extension.language != 'c':
             direction = parameter.get_extension_attribute ('gi-extension',
                     'direction')
             if direction == 'out':
@@ -81,7 +79,7 @@ class GIFormatter(Formatter):
         return res
 
     def _format_linked_symbol (self, symbol):
-        if self.__gi_extension.language == 'c':
+        if self.extension.language == 'c':
             res = Formatter._format_linked_symbol (self, symbol)
             if symbol == None:
                 res = 'void'
@@ -95,7 +93,7 @@ class GIFormatter(Formatter):
         if gi_name is None:
             return Formatter._format_linked_symbol (self, symbol)
 
-        fund = self.__gi_extension._fundamentals.get(gi_name)
+        fund = self.extension._fundamentals.get(gi_name)
         if fund:
             link = Link(fund.ref, fund._title, gi_name)
             return self._format_type_tokens ([link])
@@ -104,7 +102,7 @@ class GIFormatter(Formatter):
         return res
 
     def _format_prototype (self, function, is_pointer, title):
-        if self.__gi_extension.language == 'c':
+        if self.extension.language == 'c':
             return Formatter._format_prototype (self, function,
                     is_pointer, title)
 
@@ -116,18 +114,18 @@ class GIFormatter(Formatter):
 
         c_name = function._make_name()
 
-        if self.__gi_extension.language == 'python':
+        if self.extension.language == 'python':
             template = self.engine.get_template('python_prototype.html')
         else:
             template = self.engine.get_template('javascript_prototype.html')
 
         if type (function) == SignalSymbol:
-            comment = "%s callback for the '%s' signal" % (self.__gi_extension.language, c_name)
+            comment = "%s callback for the '%s' signal" % (self.extension.language, c_name)
         elif type (function) == VFunctionSymbol:
             comment = "%s implementation of the '%s' virtual method" % \
-                    (self.__gi_extension.language, c_name)
+                    (self.extension.language, c_name)
         else:
-            comment = "%s wrapper for '%s'" % (self.__gi_extension.language,
+            comment = "%s wrapper for '%s'" % (self.extension.language,
                     c_name)
 
         res = template.render ({'return_value': function.return_value,
@@ -139,17 +137,17 @@ class GIFormatter(Formatter):
 
     def _format_gi_vmethod (self, vmethod):
         title = vmethod.link.title
-        if self.__gi_extension.language == 'python':
+        if self.extension.language == 'python':
             vmethod.link.title = 'do_%s' % vmethod._make_name()
             title = 'do_%s' % title
-        elif self.__gi_extension.language == 'javascript':
+        elif self.extension.language == 'javascript':
             vmethod.link.title = '%s::%s' % (vmethod.gi_parent_name, vmethod._make_name())
             title = 'vfunc_%s' % title
         return self._format_callable (vmethod, "virtual method",
                 title)
 
     def _format_struct (self, struct):
-        if self.__gi_extension.language == 'c':
+        if self.extension.language == 'c':
             return Formatter._format_struct (self, struct)
         members_list = self._format_members_list (struct.members, 'Attributes')
 
@@ -159,7 +157,7 @@ class GIFormatter(Formatter):
         return (out, False)
 
     def _format_constant(self, constant):
-        if self.__gi_extension.language == 'c':
+        if self.extension.language == 'c':
             return Formatter._format_constant (self, constant)
 
         template = self.engine.get_template('constant.html')
@@ -186,13 +184,13 @@ class GIFormatter(Formatter):
         return out
 
     def get_output_folder(self):
-        return self.__gi_extension.language
+        return self.extension.language
 
     def patch_page(self, page, symbol, output):
         symbol.update_children_comments()
-        for l in self.__gi_extension.languages:
-            self.__gi_extension.setup_language (l)
-            self.format_symbol(symbol, self.__link_resolver)
+        for l in self.extension.languages:
+            self.extension.setup_language (l)
+            self.format_symbol(symbol, self.extension.app.resolver)
 
             parser = lxml.etree.XMLParser(encoding='utf-8', recover=True)
             page_path = os.path.join(output, l, page.link.ref)
@@ -207,4 +205,4 @@ class GIFormatter(Formatter):
             with open(page_path, 'w') as f:
                 tree.write_c14n(f)
 
-        self.__gi_extension.setup_language(None)
+        self.extension.setup_language(None)

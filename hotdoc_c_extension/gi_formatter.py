@@ -184,7 +184,7 @@ class GIFormatter(Formatter):
         return out
 
     def get_output_folder(self):
-        return self.extension.language
+        return self.extension.language or self.extension.languages[0]
 
     def patch_page(self, page, symbol, output):
         symbol.update_children_comments()

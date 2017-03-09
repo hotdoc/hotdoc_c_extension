@@ -102,9 +102,15 @@ class ClangScanner(object):
         self.__raw_comment_parser = GtkDocParser(project)
         self.project = project
         self.__doc_db = doc_db
+        self.__all_sources = []
 
     def scan(self, filenames, options, incremental, full_scan,
-             full_scan_patterns, fail_fast=False):
+             full_scan_patterns, fail_fast=False, all_sources=None):
+        if all_sources is None:
+            self.__all_sources = []
+        else:
+            self.__all_sources = all_sources
+
         index = cindex.Index.create()
         flags = cindex.TranslationUnit.PARSE_INCOMPLETE | cindex.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD
 
@@ -463,11 +469,21 @@ class ClangScanner(object):
                 filename=str(node.location.file), lineno=node.location.line)
 
     def __create_alias_symbol (self, node):
-        type_tokens = self.make_c_style_type_name(node.underlying_typedef_type)
+        typedef = node.underlying_typedef_type
+        type_tokens = self.make_c_style_type_name(typedef)
         aliased_type = QualifiedSymbol (type_tokens=type_tokens)
-        return self.__doc_db.get_or_create_symbol(AliasSymbol, aliased_type=aliased_type,
-                display_name=node.spelling, filename=str(node.location.file),
-                lineno=node.location.line)
+
+        extra = {}
+        if typedef.get_declaration().location.file:
+            aliased_filename = str(typedef.get_declaration().location.file)
+            if aliased_filename in self.__all_sources:
+                extra['implementation_filename'] = aliased_filename
+
+        filename = str(node.location.file)
+
+        symb = self.__doc_db.get_or_create_symbol(AliasSymbol, aliased_type=aliased_type,
+                display_name=node.spelling, filename=filename,
+                lineno=node.location.line, extra=extra)
 
     def __create_typedef_symbol (self, node):
         t = node.underlying_typedef_type
@@ -652,7 +668,8 @@ class CExtension(Extension):
         super(CExtension, self).setup()
         stale, unlisted = self.get_stale_files(self.sources)
         self.scanner.scan(stale, self.flags,
-                          self.app.incremental, False, ['*.h'])
+                          self.app.incremental, False, ['*.h'],
+                          all_sources=self.sources)
 
     @staticmethod
     def add_arguments (parser):

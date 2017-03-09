@@ -1038,3 +1038,7 @@ class GIExtension(Extension):
 
     def __rename_page_link (self, page_parser, original_name):
         return self.__translated_names.get(original_name)
+
+    def _get_smart_key(self, symbol):
+        return symbol.extra.get('implementation_filename',
+                                super()._get_smart_key(symbol))

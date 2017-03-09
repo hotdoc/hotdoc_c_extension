@@ -135,6 +135,9 @@ class GIExtension(Extension):
     extension_name = "gi-extension"
     argument_prefix = "gi"
 
+    __gathered_gtk_doc_links = False
+    __gtkdoc_hrefs = {}
+
     def __init__(self, app, project):
         Extension.__init__(self, app, project)
 
@@ -171,7 +174,6 @@ class GIExtension(Extension):
         self.__annotation_parser = GIAnnotationParser()
 
         self.__translated_names = {}
-        self.__gtkdoc_hrefs = {}
 
         self._fundamentals = {}
 
@@ -223,16 +225,20 @@ class GIExtension(Extension):
 
     def setup (self):
         super(GIExtension, self).setup()
+
+        if not self.__gathered_gtk_doc_links:
+            self.__gather_gtk_doc_links()
+            self.__gathered_gtk_doc_links = True
+
         if not self.sources:
             return
 
         self.info('Gathering legacy gtk-doc links')
-        self.__gather_gtk_doc_links()
         self.project.tree.resolving_symbol_signal.connect (self.__resolving_symbol)
         self.app.link_resolver.resolving_link_signal.connect(self.__translate_link_ref)
 
     def format_page(self, page, link_resolver, output):
-        link_resolver.get_link_signal.connect(self.__search_legacy_links)
+        link_resolver.get_link_signal.connect(self.search_online_links)
         self.c_extension.formatter.formatting_symbol_signal.connect(self.__formatting_symbol)
         page.meta['extra']['gi-languages'] = ','.join(self.languages)
         for l in self.languages:
@@ -242,7 +248,7 @@ class GIExtension(Extension):
 
         self.setup_language(None)
 
-        link_resolver.get_link_signal.disconnect(self.__search_legacy_links)
+        link_resolver.get_link_signal.disconnect(self.search_online_links)
         self.c_extension.formatter.formatting_symbol_signal.disconnect(self.__formatting_symbol)
 
     def __find_gir_file(self, gir_name):
@@ -529,8 +535,9 @@ class GIExtension(Extension):
 
         return None
 
-    def __search_legacy_links(self, resolver, name):
-        href = self.__gtkdoc_hrefs.get(name)
+    @classmethod
+    def search_online_links(cls, resolver, name):
+        href = cls.__gtkdoc_hrefs.get(name)
         if href:
             return Link(href, name, name)
         return None
@@ -839,7 +846,7 @@ class GIExtension(Extension):
 
         type_tokens, gi_name = self.__type_tokens_and_gi_name_from_gi_node(node)
         type_ = QualifiedSymbol (type_tokens=type_tokens)
-        type_.add_extension_attribute ('gi-extension', 'gi_name', gi_name)
+        type_.add_extension_attribute('gi-extension', 'gi_name', gi_name)
 
         flags = []
         writable = node.attrib.get('writable')

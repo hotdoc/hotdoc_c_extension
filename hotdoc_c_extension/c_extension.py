@@ -669,5 +669,5 @@ class CExtension(Extension):
     def parse_config(self, config):
         super(CExtension, self).parse_config(config)
         self.flags = flags_from_config(config)
-        for dir_ in self.include_directories:
+        for dir_ in config.get('c_include_directories', []):
             self.flags.append('-I%s' % dir_)

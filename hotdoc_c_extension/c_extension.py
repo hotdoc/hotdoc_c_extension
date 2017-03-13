@@ -129,6 +129,7 @@ class ClangScanner(object):
         header_guarded = set()
 
         for filename in self.filenames:
+            break
             if filename in self.parsed:
                 continue
 

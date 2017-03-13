@@ -67,7 +67,7 @@ from .fundamentals import PY_FUNDAMENTALS, JS_FUNDAMENTALS
 
 Logger.register_warning_code('missing-gir-include', BadInclusionException,
                              'gi-extension')
-
+Logger.silent = True
 
 class Flag (object):
     def __init__ (self, nick, link):
@@ -130,6 +130,79 @@ languages.
 Must be used in combination with the C extension.
 """
 
+
+def pprint_xml(node):
+    print (etree.tostring(node, pretty_print=True).decode())
+
+
+def core_ns(tag):
+    return '{http://www.gtk.org/introspection/core/1.0}%s' % tag
+
+
+def glib_ns(tag):
+    return '{http://www.gtk.org/introspection/glib/1.0}%s' % tag
+
+
+def c_ns(tag):
+    return '{http://www.gtk.org/introspection/c/1.0}%s' % tag
+
+
+class SymbolTarget:
+    def __init__(self, extension):
+        self.extension = extension
+        self.__smart_key_stack = []
+        self.__nsmap = {'core': 'http://www.gtk.org/introspection/core/1.0',
+                        'c': 'http://www.gtk.org/introspection/c/1.0',
+                        'glib': 'http://www.gtk.org/introspection/glib/1.0'}
+
+    def start (self, tag, attrib):
+        tag = tag.split('}')[1]
+        try:
+            func = getattr(self, 'start_%s' % tag)
+        except AttributeError:
+            return
+
+        func(attrib)
+
+    def end (self, tag):
+        tag = tag.split('}')[1]
+        try:
+            func = getattr(self, 'end_%s' % tag)
+        except AttributeError:
+            return
+
+        func()
+
+    def __get_klass_name(self, attrib):
+        klass_name = attrib.get('{%s}type' % self.__nsmap['c'])
+        if not klass_name:
+            klass_name = attrib.get('{%s}type-name' % self.__nsmap['glib'])
+        return klass_name
+
+    def start_class(self, attrib):
+        name = self.__get_klass_name(attrib)
+        unique_name = '%s::%s' % (name, name)
+        comment = self.extension.app.database.get_comment(unique_name)
+        if comment:
+            smart_key = '%s.h' % os.path.splitext(comment.filename)[0]
+        else:
+            smart_key = unique_name
+
+        self.__smart_key_stack.append(smart_key)
+
+        self.extension.get_or_create_symbol(ClassSymbol,
+                                            display_name=name,
+                                            unique_name=unique_name,
+                                            extra={'gi-smart-key': smart_key})
+
+    def end_class(self):
+        self.__smart_key_stack.pop()
+
+    def start_function(self, attrib):
+        pass
+
+    def close (self):
+        return 0
 
 class GIExtension(Extension):
     extension_name = "gi-extension"
@@ -234,8 +307,9 @@ class GIExtension(Extension):
             return
 
         self.info('Gathering legacy gtk-doc links')
-        self.project.tree.resolving_symbol_signal.connect (self.__resolving_symbol)
-        self.app.link_resolver.resolving_link_signal.connect(self.__translate_link_ref)
+        self.__scan_sources()
+        #self.project.tree.resolving_symbol_signal.connect (self.__resolving_symbol)
+        #self.app.link_resolver.resolving_link_signal.connect(self.__translate_link_ref)
 
     def format_page(self, page, link_resolver, output):
         link_resolver.get_link_signal.connect(self.search_online_links)
@@ -250,6 +324,44 @@ class GIExtension(Extension):
 
         link_resolver.get_link_signal.disconnect(self.search_online_links)
         self.formatter.formatting_symbol_signal.disconnect(self.__formatting_symbol)
+
+    def __scan_sources(self):
+        for gir_file in self.sources:
+            root = etree.parse(gir_file).getroot()
+            self.__scan_node(root)
+
+    def __core_ns(self, tag):
+        return '{%s}%s' % tag, self.__nsmap['core']
+
+    def __scan_node(self, node):
+        components = self.__get_gi_name_components(node) 
+        gi_name = '.'.join(components)
+
+        if node.tag == core_ns('class'):
+            self.__create_class_symbol (node, gi_name)
+        elif node.tag in (core_ns('function'), core_ns('method')):
+            self.__create_function_symbol(node)
+            return  # No need to iterate any further
+        elif node.tag == core_ns('virtual-method'):
+            self.__create_vfunc_symbol(node)
+            return  # No need to iterate any further
+        elif node.tag == core_ns('property'):
+            self.__create_property_symbol(node)
+            return  # No need to iterate any further
+        elif node.tag == glib_ns('signal'):
+            self.__create_signal_symbol(node)
+            return  # No need to iterate any further
+        elif node.tag == core_ns('alias'):
+            self.__create_alias_symbol(node, gi_name)
+            return  # No need to iterate any further
+        elif node.tag in (core_ns('repository'), core_ns('include'),
+                core_ns('package'), core_ns('namespace'), core_ns('doc')):
+            pass
+        elif True:
+            print (node.tag)
+
+        for cnode in node:
+            self.__scan_node(cnode)
 
     def __find_gir_file(self, gir_name):
         for source in self.sources:
@@ -641,7 +753,6 @@ class GIExtension(Extension):
 
     # We implement filtering of some symbols
     def get_or_create_symbol(self, *args, **kwargs):
-        kwargs['language'] = 'c'
         if self.smart_index:
             res = self.__smart_filter(*args, **kwargs)
             return res
@@ -812,14 +923,17 @@ class GIExtension(Extension):
         symbol.add_extension_attribute ('gi-extension',
                 'parameters', in_parameters)
 
-    def __create_signal_symbol (self, node, object_name):
+    def __create_signal_symbol (self, node):
+        parent_name = self.__get_klass_name(node.getparent())
+        klass_name = '%s::%s' % (parent_name, parent_name)
         name = node.attrib['name']
-        unique_name = '%s::%s' % (object_name, name)
+        unique_name = '%s::%s' % (parent_name, name)
 
         parameters, retval = self.__create_parameters_and_retval (node)
         res = self.get_or_create_symbol(SignalSymbol,
                 parameters=parameters, return_value=retval,
-                display_name=name, unique_name=unique_name)
+                display_name=name, unique_name=unique_name,
+                filename=self.__get_symbol_filename(klass_name))
 
         flags = []
 
@@ -843,9 +957,11 @@ class GIExtension(Extension):
 
         return res
 
-    def __create_property_symbol (self, node, object_name):
+    def __create_property_symbol (self, node):
+        parent_name = self.__get_klass_name(node.getparent())
+        klass_name = '%s::%s' % (parent_name, parent_name)
         name = node.attrib['name']
-        unique_name = '%s:%s' % (object_name, name)
+        unique_name = '%s:%s' % (parent_name, name)
 
         type_tokens, gi_name = self.__type_tokens_and_gi_name_from_gi_node(node)
         type_ = QualifiedSymbol (type_tokens=type_tokens)
@@ -866,38 +982,58 @@ class GIExtension(Extension):
 
         res = self.get_or_create_symbol(PropertySymbol,
                 prop_type=type_,
-                display_name=name, unique_name=unique_name)
+                display_name=name,
+                unique_name=unique_name,
+                filename=self.__get_symbol_filename(klass_name))
 
         extra_content = self.formatter._format_flags (flags)
         res.extension_contents['Flags'] = extra_content
 
         return res
 
-    def __create_vfunc_symbol (self, node, object_name):
+    def __create_vfunc_symbol (self, node):
+        parent_name = self.__get_klass_name(node.getparent())
+        klass_name = '%s::%s' % (parent_name, parent_name)
         name = node.attrib['name']
-        unique_name = '%s:::%s' % (object_name, name)
+        unique_name = '%s:::%s' % (parent_name, name)
 
         parameters, retval = self.__create_parameters_and_retval (node)
         symbol = self.get_or_create_symbol(VFunctionSymbol,
                 parameters=parameters,
                 return_value=retval, display_name=name,
-                unique_name=unique_name)
+                unique_name=unique_name,
+                filename=self.__get_symbol_filename(klass_name))
 
         self.__sort_parameters (symbol, retval, parameters)
 
         return symbol
 
-    def __create_class_symbol (self, symbol, gi_name):
-        klass_name = '%s::%s' % (symbol.unique_name, symbol.unique_name)
+    def __get_symbol_filename(self, unique_name):
+        comment = self.app.database.get_comment(unique_name)
+        if comment:
+            return '%s.h' % os.path.splitext(comment.filename)[0]
+        return 'Miscellaneous'
+
+    def __create_alias_symbol (self, node, gi_name):
+        name = node.attrib.get(c_ns('type'))
+        type_tokens, gi_name = self.__type_tokens_and_gi_name_from_gi_node(node)
+        aliased_type = QualifiedSymbol(type_tokens=type_tokens)
+        filename = self.__get_symbol_filename(name)
+        self.get_or_create_symbol(AliasSymbol, aliased_type=aliased_type,
+                display_name=name, filename=filename)
+
+    def __create_class_symbol (self, node, gi_name):
+        klass_name = self.__get_klass_name (node)
+        unique_name = '%s::%s' % (klass_name, klass_name)
         hierarchy = self.__gir_hierarchies[gi_name]
         children = self.__gir_children_map[gi_name]
 
-        class_symbol = self.get_or_create_symbol(ClassSymbol,
-                hierarchy=hierarchy, children=children,
-                display_name=symbol.display_name,
-                unique_name=klass_name)
 
-        return class_symbol
+        self.get_or_create_symbol(ClassSymbol,
+                hierarchy=hierarchy, children=children,
+                display_name=klass_name,
+                unique_name=unique_name,
+                filename=self.__get_symbol_filename(unique_name))
 
     def __create_interface_symbol (self, node, symbol, gi_name):
         iface_name = '%s::%s' % (symbol.unique_name, symbol.unique_name)
@@ -908,7 +1044,7 @@ class GIExtension(Extension):
 
     def __get_gi_name_components(self, node):
         parent = node.getparent()
-        components = [node.attrib['name']]
+        components = [node.attrib.get('name', '')]
         while parent is not None:
             try:
                 components.insert(0, parent.attrib['name'])
@@ -936,33 +1072,26 @@ class GIExtension(Extension):
 
         return components, gi_name
 
-    def __update_function (self, func, node):
-        self.debug('Updating function %s' % func.display_name)
-        func.is_method = node.tag.endswith ('method')
+    def __get_function_name(self, func):
+        return func.attrib.get('{%s}identifier' % self.__nsmap['c'])
 
-        self.__add_translations(func.unique_name, node)
+    def __create_function_symbol (self, node):
+        name = self.__get_function_name(node)
+
+        self.__add_translations(name, node)
 
         gi_params, retval = self.__create_parameters_and_retval (node)
 
-        func.return_value = retval
+        func = self.get_or_create_symbol(FunctionSymbol,
+                                         parameters=gi_params,
+                                         return_value=retval,
+                                         display_name=name,
+                                         unique_name=name,
+                                         throws='throws' in node.attrib,
+                                         is_method=node.tag.endswith ('method'),
+                                         filename=self.__get_symbol_filename(name))
 
-        func_parameters = func.parameters
-
-        if 'throws' in node.attrib:
-            func_parameters = func_parameters[:-1]
-            func.throws = True
-
-        for i, param in enumerate (func_parameters):
-            gi_param = gi_params[i]
-            gi_name = gi_param.get_extension_attribute ('gi-extension',
-                    'gi_name')
-            param.add_extension_attribute ('gi-extension', 'gi_name', gi_name)
-            direction = gi_param.get_extension_attribute ('gi-extension',
-                    'direction')
-            param.add_extension_attribute('gi-extension', 'direction',
-                    direction)
-
-        self.__sort_parameters (func, func.return_value, func_parameters)
+        self.__sort_parameters (func, func.return_value, func.parameters)
 
     def __update_struct (self, symbol, node):
         self.debug('Updating record %s' % symbol.display_name)

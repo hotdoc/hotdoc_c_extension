@@ -334,7 +334,7 @@ class GIExtension(Extension):
         return '{%s}%s' % tag, self.__nsmap['core']
 
     def __scan_node(self, node):
-        components = self.__get_gi_name_components(node) 
+        components = self.__get_gi_name_components(node)
         gi_name = '.'.join(components)
 
         if node.tag == core_ns('class'):
@@ -357,8 +357,10 @@ class GIExtension(Extension):
         elif node.tag in (core_ns('repository'), core_ns('include'),
                 core_ns('package'), core_ns('namespace'), core_ns('doc')):
             pass
+        elif node.tag == core_ns('record'):
+            self.__create_struct_symbol(node)
         elif True:
-            print (node.tag)
+            print("%s - %s" % (node.tag, node.text))
 
         for cnode in node:
             self.__scan_node(cnode)
@@ -734,11 +736,6 @@ class GIExtension(Extension):
         if type_ == StructSymbol:
             node = self.__node_cache.get(name)
             if node is not None:
-                is_gtype_struct_for = node.attrib.get('{%s}is-gtype-struct-for' %
-                    self.__nsmap['glib'])
-                if is_gtype_struct_for:
-                    self.debug('Dropping class structure %s' % name)
-                    return None
                 disguised = node.attrib.get('disguised')
                 if disguised == '1':
                     self.debug("Dropping private structure %s" % name)
@@ -1028,12 +1025,54 @@ class GIExtension(Extension):
         hierarchy = self.__gir_hierarchies[gi_name]
         children = self.__gir_children_map[gi_name]
 
-
         self.get_or_create_symbol(ClassSymbol,
                 hierarchy=hierarchy, children=children,
                 display_name=klass_name,
                 unique_name=unique_name,
                 filename=self.__get_symbol_filename(unique_name))
+
+    def __get_return_type_from_callback(self, node):
+        return_node = node.find(core_ns('callback')).find(
+            core_ns('return-value'))
+
+        return return_node.find(core_ns('type')).attrib[c_ns('type')]
+
+    def __create_struct_symbol(self, node):
+        struct_name = node.attrib["{%s}%s" % (
+            self.__nsmap['c'], 'type')]
+        members = []
+        filename = self.__get_symbol_filename(struct_name)
+        for field in node.findall(core_ns('field')):
+            is_function_pointer = False
+            if len(field) and field[0].tag == core_ns('callback'):
+                is_function_pointer = True
+                type_ = self.__get_return_type_from_callback(field)
+                tokens = self.__type_tokens_from_cdecl (type_)
+            elif len(field) and field[0].tag == core_ns('array'):
+                name = field.attrib['name']
+                type_ = field.find(core_ns('array')).attrib[c_ns('type')]
+                tokens = self.__type_tokens_from_cdecl (type_)
+            else:
+                name = field.attrib['name']
+                type_ = field.find(core_ns('type')).attrib[c_ns('type')]
+                tokens = self.__type_tokens_from_cdecl (type_)
+
+            name = "%s" % (name)
+            print("NAme %s -- type: %s -> %s" % (name, type_, tokens))
+            qtype = QualifiedSymbol(type_tokens=tokens)
+            member = self.get_or_create_symbol(
+                FieldSymbol, is_function_pointer=is_function_pointer,
+                member_name=name, qtype=qtype,
+                filename=filename, display_name=name,
+                unique_name=name)
+            members.append(member)
+
+        print("Creating %s" % struct_name)
+        self.get_or_create_symbol(StructSymbol,
+                display_name=struct_name,
+                unique_name=struct_name,
+                filename=filename, members=members)
+        print("Done!")
 
     def __create_interface_symbol (self, node, symbol, gi_name):
         iface_name = '%s::%s' % (symbol.unique_name, symbol.unique_name)

@@ -57,8 +57,9 @@ from hotdoc.core.formatter import Formatter
 from hotdoc.core.links import Link, LinkResolver
 from hotdoc.core.tree import Page
 from hotdoc.core.comment import Comment
-from hotdoc.core.exceptions import BadInclusionException
+from hotdoc.core.exceptions import BadInclusionException, InvalidOutputException
 from hotdoc.utils.loggable import warn, Logger
+from hotdoc.utils.utils import OrderedSet
 
 from .gi_formatter import GIFormatter
 from .gi_annotation_parser import GIAnnotationParser
@@ -66,6 +67,8 @@ from .fundamentals import PY_FUNDAMENTALS, JS_FUNDAMENTALS
 
 
 Logger.register_warning_code('missing-gir-include', BadInclusionException,
+                             'gi-extension')
+Logger.register_warning_code('no-class-comment', InvalidOutputException,
                              'gi-extension')
 
 class Flag (object):
@@ -253,6 +256,8 @@ class GIExtension(Extension):
 
         self.c_extension = project.extensions.get('c-extension')
 
+        self.__current_output_filename = None
+
     @staticmethod
     def add_arguments (parser):
         group = parser.add_argument_group('GObject-introspection extension',
@@ -332,41 +337,94 @@ class GIExtension(Extension):
     def __core_ns(self, tag):
         return '{%s}%s' % tag, self.__nsmap['core']
 
-    def __scan_node(self, node):
+    def __get_symbol_names(self, node):
+        if node.tag in (core_ns('class')):
+            klass_name = self.__get_klass_name (node)
+            unique_name = '%s' % (klass_name)
+            return unique_name, unique_name, klass_name
+        elif node.tag in (core_ns('function'), core_ns('method'), core_ns('constructor')):
+            fname = self.__get_function_name(node)
+
+            return fname, fname, fname
+        elif node.tag == core_ns('virtual-method'):
+            parent_name = self.__get_klass_name(node.getparent())
+            klass_name = '%s::%s' % (parent_name, parent_name)
+            name = node.attrib['name']
+            unique_name = '%s:::%s' % (parent_name, name)
+
+            return unique_name, name, klass_name
+        elif node.tag == core_ns('property'):
+            parent_name = self.__get_klass_name(node.getparent())
+            klass_name = '%s::%s' % (parent_name, parent_name)
+            name = node.attrib['name']
+            unique_name = '%s:%s' % (parent_name, name)
+
+            return unique_name, name, klass_name
+        elif node.tag == glib_ns('signal'):
+            parent_name = self.__get_klass_name(node.getparent())
+            klass_name = '%s::%s' % (parent_name, parent_name)
+            name = node.attrib['name']
+            unique_name = '%s::%s' % (parent_name, name)
+
+            return unique_name, name, klass_name
+        elif node.tag == core_ns('alias'):
+            name = node.attrib.get(c_ns('type'))
+
+            return name, name, name
+        elif node.tag == core_ns('record'):
+            name = node.attrib["{%s}%s" % (self.__nsmap['c'], 'type')]
+
+            return name, name, name
+        elif node.tag in (core_ns('enumeration'), core_ns('bitfield')):
+            name = node.attrib[c_ns('type')]
+
+            return name, name, name
+
+        return None, None, None
+
+    def __scan_node(self, node, recurse=True):
         components = self.__get_gi_name_components(node)
+        res = None
         gi_name = '.'.join(components)
 
         if node.tag == core_ns('class'):
-            self.__create_class_symbol (node, gi_name)
-        elif node.tag in (core_ns('function'), core_ns('method')):
-            self.__create_function_symbol(node)
-            return  # No need to iterate any further
+            res = self.__create_structure(ClassSymbol, node, gi_name)
+            recurse = False
+        elif node.tag in (core_ns('function'), core_ns('method'), core_ns('constructor')):
+            res = self.__create_function_symbol(node)
+            recurse = False
         elif node.tag == core_ns('virtual-method'):
-            self.__create_vfunc_symbol(node)
-            return  # No need to iterate any further
+            res = self.__create_vfunc_symbol(node)
+            recurse = False
         elif node.tag == core_ns('property'):
-            self.__create_property_symbol(node)
-            return  # No need to iterate any further
+            res = self.__create_property_symbol(node)
+            recurse = False
         elif node.tag == glib_ns('signal'):
-            self.__create_signal_symbol(node)
-            return  # No need to iterate any further
+            res = self.__create_signal_symbol(node)
+            recurse = False
         elif node.tag == core_ns('alias'):
-            self.__create_alias_symbol(node, gi_name)
-            return  # No need to iterate any further
+            res = self.__create_alias_symbol(node, gi_name)
+            recurse = False
         elif node.tag in (core_ns('repository'), core_ns('include'),
                 core_ns('package'), core_ns('namespace'), core_ns('doc')):
             pass
         elif node.tag == core_ns('record'):
-            self.__create_struct_symbol(node)
+            res = self.__create_structure(StructSymbol, node, gi_name)
+            recurse = False
         elif node.tag == core_ns('enumeration'):
-            self.__create_enum_symbol(node)
+            res = self.__create_enum_symbol(node)
+            recurse = False
         elif node.tag == core_ns('bitfield'):
-            self.__create_enum_symbol(node)
+            res = self.__create_enum_symbol(node)
+            recurse = False
         elif True:
             print("%s - %s" % (node.tag, node.text))
 
-        for cnode in node:
-            self.__scan_node(cnode)
+        if recurse:
+            for cnode in node:
+                self.__scan_node(cnode)
+        else:
+            return res
 
     def __create_enum_symbol (self, node, spelling=None):
         name = node.attrib[c_ns('type')]
@@ -380,7 +438,7 @@ class GIExtension(Extension):
             member.enum_value = field.attrib['value']
             members.append(member)
 
-        self.get_or_create_symbol(EnumSymbol, members=members,
+        return self.get_or_create_symbol(EnumSymbol, members=members,
                                   anonymous=False, display_name=name,
                                   filename=filename, raw_text=None)
 
@@ -940,10 +998,7 @@ class GIExtension(Extension):
                 'parameters', in_parameters)
 
     def __create_signal_symbol (self, node):
-        parent_name = self.__get_klass_name(node.getparent())
-        klass_name = '%s::%s' % (parent_name, parent_name)
-        name = node.attrib['name']
-        unique_name = '%s::%s' % (parent_name, name)
+        unique_name, name, klass_name = self.__get_symbol_names(node)
 
         parameters, retval = self.__create_parameters_and_retval (node)
         res = self.get_or_create_symbol(SignalSymbol,
@@ -974,10 +1029,7 @@ class GIExtension(Extension):
         return res
 
     def __create_property_symbol (self, node):
-        parent_name = self.__get_klass_name(node.getparent())
-        klass_name = '%s::%s' % (parent_name, parent_name)
-        name = node.attrib['name']
-        unique_name = '%s:%s' % (parent_name, name)
+        unique_name, name, klass_name = self.__get_symbol_names(node)
 
         type_tokens, gi_name = self.__type_tokens_and_gi_name_from_gi_node(node)
         type_ = QualifiedSymbol (type_tokens=type_tokens)
@@ -1008,11 +1060,7 @@ class GIExtension(Extension):
         return res
 
     def __create_vfunc_symbol (self, node):
-        parent_name = self.__get_klass_name(node.getparent())
-        klass_name = '%s::%s' % (parent_name, parent_name)
-        name = node.attrib['name']
-        unique_name = '%s:::%s' % (parent_name, name)
-
+        unique_name, name, klass_name = self.__get_symbol_names(node)
         parameters, retval = self.__create_parameters_and_retval (node)
         symbol = self.get_or_create_symbol(VFunctionSymbol,
                 parameters=parameters,
@@ -1025,52 +1073,111 @@ class GIExtension(Extension):
         return symbol
 
     def __get_symbol_filename(self, unique_name):
+        if self.__current_output_filename:
+            return self.__current_output_filename
+
         comment = self.app.database.get_comment(unique_name)
         if comment:
             return '%s.h' % os.path.splitext(comment.filename)[0]
+
         return 'Miscellaneous'
 
     def __create_alias_symbol (self, node, gi_name):
-        name = node.attrib.get(c_ns('type'))
+        name = self.__get_symbol_names(node)[0]
+
         type_tokens, gi_name = self.__type_tokens_and_gi_name_from_gi_node(node)
         aliased_type = QualifiedSymbol(type_tokens=type_tokens)
         filename = self.__get_symbol_filename(name)
-        self.get_or_create_symbol(AliasSymbol, aliased_type=aliased_type,
+
+        return self.get_or_create_symbol(AliasSymbol, aliased_type=aliased_type,
                 display_name=name, filename=filename)
 
-    def __create_class_symbol (self, node, gi_name):
+    def __create_structure(self, symbol_type, node, gi_name):
         if node.attrib.get(glib_ns('fundamental')) == '1':
             self.debug('%s is a fundamental type, not an actual '
                        'object class' % (node.attrib['name']))
             return
-        klass_name = self.__get_klass_name (node)
-        unique_name = '%s' % (klass_name)
+
+        unique_name, unused_name, klass_name = self.__get_symbol_names(node)
+        filename = self.__get_symbol_filename(unique_name)
+
+        if filename == 'Miscellaneous':
+            filenames = []
+
+            for cnode in node:
+                cunique_name = self.__get_symbol_names(cnode)[0]
+                if not cunique_name:
+                    continue
+                fname = self.__get_symbol_filename(cunique_name)
+                if fname != 'Miscellaneous':
+                    if cnode.tag == core_ns('constructor'):
+                        filenames.insert(0, fname)
+                    else:
+                        filenames.append(fname)
+
+            unique_filenames = list(OrderedSet(filenames))
+            if not filenames:
+                self.warn("no-class-comment",
+                            "No way to determine where %s should land"
+                            " putting it to Miscellaneous for now."
+                            " Please document the class so smart indexing"
+                            " can work properly" % gi_name)
+            else:
+                filename = unique_filenames[0]
+                if len(unique_filenames) > 1:
+                    self.warn("no-class-comment",
+                                " Going wild here to determine where %s needs to land"
+                                " as we could detect the following possibilities: %s."
+                                % (gi_name, unique_filenames))
+                else:
+                    self.debug(" No class comment for %s determined that it should"
+                               " land into %s with all other class related documentation."
+                               % (gi_name, filename))
+
+
+        self.__current_output_filename = filename
+        for cnode in node:
+            sym = self.__scan_node(cnode, False)
+
+        if symbol_type == ClassSymbol:
+            res = self.__create_class_symbol(node, gi_name,
+                                            klass_name,
+                                            unique_name,
+                                            filename)
+        else:
+            res = self.__create_struct_symbol(node, unique_name)
+        self.__current_output_filename = None
+
+        return res
+
+
+    def __create_class_symbol (self, node, gi_name, klass_name,
+                               unique_name, filename):
         hierarchy = self.__gir_hierarchies[gi_name]
         children = self.__gir_children_map[gi_name]
-        filename = self.__get_symbol_filename(unique_name)
 
         members = self.__get_structure_members(node,
                                                filename,
                                                klass_name)
 
-        self.get_or_create_symbol(ClassSymbol,
-                                  hierarchy=hierarchy,
-                                  children=children,
-                                  display_name=klass_name,
-                                  unique_name=unique_name,
-                                  filename=filename,
-                                  members=members)
+        return self.get_or_create_symbol(ClassSymbol,
+                                         hierarchy=hierarchy,
+                                         children=children,
+                                         display_name=klass_name,
+                                         unique_name=unique_name,
+                                         filename=filename,
+                                         members=members)
 
     def __get_array_type(self, node):
         array = node.find(core_ns('array'))
-        if not array:
+        if array is None:
             return None
 
         return array.attrib[c_ns('type')]
 
     def __get_return_type_from_callback(self, node):
         callback = node.find(core_ns('callback'))
-        if not callback:
+        if callback is None:
             return None
 
         return_node = node.find(core_ns('callback')).find(core_ns('return-value'))
@@ -1110,15 +1217,13 @@ class GIExtension(Extension):
 
         return members
 
-    def __create_struct_symbol(self, node):
-        struct_name = node.attrib["{%s}%s" % (
-            self.__nsmap['c'], 'type')]
+    def __create_struct_symbol(self, node, struct_name):
         filename = self.__get_symbol_filename(struct_name)
         members = self.__get_structure_members(node,
                                                filename,
                                                struct_name)
 
-        self.get_or_create_symbol(StructSymbol,
+        return self.get_or_create_symbol(StructSymbol,
                                   display_name=struct_name,
                                   unique_name=struct_name,
                                   anonymous=False,
@@ -1166,7 +1271,7 @@ class GIExtension(Extension):
         return func.attrib.get('{%s}identifier' % self.__nsmap['c'])
 
     def __create_function_symbol (self, node):
-        name = self.__get_function_name(node)
+        name = self.__get_symbol_names(node)[0]
 
         self.__add_translations(name, node)
 
@@ -1179,9 +1284,11 @@ class GIExtension(Extension):
                                          unique_name=name,
                                          throws='throws' in node.attrib,
                                          is_method=node.tag.endswith ('method'),
+                                         is_constructor=node.tag==core_ns('constructor'),
                                          filename=self.__get_symbol_filename(name))
 
         self.__sort_parameters (func, func.return_value, func.parameters)
+        return func
 
     def __update_struct (self, symbol, node):
         self.debug('Updating record %s' % symbol.display_name)

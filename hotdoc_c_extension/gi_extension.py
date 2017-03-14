@@ -67,7 +67,6 @@ from .fundamentals import PY_FUNDAMENTALS, JS_FUNDAMENTALS
 
 Logger.register_warning_code('missing-gir-include', BadInclusionException,
                              'gi-extension')
-Logger.silent = True
 
 class Flag (object):
     def __init__ (self, nick, link):
@@ -359,11 +358,31 @@ class GIExtension(Extension):
             pass
         elif node.tag == core_ns('record'):
             self.__create_struct_symbol(node)
+        elif node.tag == core_ns('enumeration'):
+            self.__create_enum_symbol(node)
+        elif node.tag == core_ns('bitfield'):
+            self.__create_enum_symbol(node)
         elif True:
             print("%s - %s" % (node.tag, node.text))
 
         for cnode in node:
             self.__scan_node(cnode)
+
+    def __create_enum_symbol (self, node, spelling=None):
+        name = node.attrib[c_ns('type')]
+
+        filename = self.__get_symbol_filename(name)
+        members = []
+        for field in node.findall(core_ns('member')):
+            member = self.get_or_create_symbol(
+                Symbol, display_name=field.attrib[c_ns('identifier')],
+                filename=filename)
+            member.enum_value = field.attrib['value']
+            members.append(member)
+
+        self.get_or_create_symbol(EnumSymbol, members=members,
+                                  anonymous=False, display_name=name,
+                                  filename=filename, raw_text=None)
 
     def __find_gir_file(self, gir_name):
         for source in self.sources:
@@ -1020,59 +1039,91 @@ class GIExtension(Extension):
                 display_name=name, filename=filename)
 
     def __create_class_symbol (self, node, gi_name):
+        if node.attrib.get(glib_ns('fundamental')) == '1':
+            self.debug('%s is a fundamental type, not an actual '
+                       'object class' % (node.attrib['name']))
+            return
         klass_name = self.__get_klass_name (node)
-        unique_name = '%s::%s' % (klass_name, klass_name)
+        unique_name = '%s' % (klass_name)
         hierarchy = self.__gir_hierarchies[gi_name]
         children = self.__gir_children_map[gi_name]
+        filename = self.__get_symbol_filename(unique_name)
+
+        members = self.__get_structure_members(node,
+                                               filename,
+                                               klass_name)
 
         self.get_or_create_symbol(ClassSymbol,
-                hierarchy=hierarchy, children=children,
-                display_name=klass_name,
-                unique_name=unique_name,
-                filename=self.__get_symbol_filename(unique_name))
+                                  hierarchy=hierarchy,
+                                  children=children,
+                                  display_name=klass_name,
+                                  unique_name=unique_name,
+                                  filename=filename,
+                                  members=members)
+
+    def __get_array_type(self, node):
+        array = node.find(core_ns('array'))
+        if not array:
+            return None
+
+        return array.attrib[c_ns('type')]
 
     def __get_return_type_from_callback(self, node):
-        return_node = node.find(core_ns('callback')).find(
-            core_ns('return-value'))
+        callback = node.find(core_ns('callback'))
+        if not callback:
+            return None
+
+        return_node = node.find(core_ns('callback')).find(core_ns('return-value'))
+        array_type = self.__get_array_type(return_node)
+        if array_type:
+            return array_type
 
         return return_node.find(core_ns('type')).attrib[c_ns('type')]
 
-    def __create_struct_symbol(self, node):
-        struct_name = node.attrib["{%s}%s" % (
-            self.__nsmap['c'], 'type')]
+    def __get_structure_members(self, node, filename, struct_name):
         members = []
-        filename = self.__get_symbol_filename(struct_name)
         for field in node.findall(core_ns('field')):
             is_function_pointer = False
-            if len(field) and field[0].tag == core_ns('callback'):
-                is_function_pointer = True
-                type_ = self.__get_return_type_from_callback(field)
-                tokens = self.__type_tokens_from_cdecl (type_)
-            elif len(field) and field[0].tag == core_ns('array'):
-                name = field.attrib['name']
-                type_ = field.find(core_ns('array')).attrib[c_ns('type')]
-                tokens = self.__type_tokens_from_cdecl (type_)
-            else:
-                name = field.attrib['name']
-                type_ = field.find(core_ns('type')).attrib[c_ns('type')]
-                tokens = self.__type_tokens_from_cdecl (type_)
+            field_name = field.attrib['name']
 
-            name = "%s" % (name)
-            print("NAme %s -- type: %s -> %s" % (name, type_, tokens))
+            callback_return_type = self.__get_return_type_from_callback(field)
+            if callback_return_type:
+                is_function_pointer = True
+                type_ = callback_return_type
+            else:
+                array_type = self.__get_array_type(field)
+                if array_type:
+                    type_ = array_type
+                else:
+                    type_ = field.find(core_ns('type')).attrib[c_ns('type')]
+
+            tokens = self.__type_tokens_from_cdecl (type_)
+
+            name = "%s.%s" % (struct_name, field_name)
             qtype = QualifiedSymbol(type_tokens=tokens)
             member = self.get_or_create_symbol(
                 FieldSymbol, is_function_pointer=is_function_pointer,
-                member_name=name, qtype=qtype,
+                member_name=field_name, qtype=qtype,
                 filename=filename, display_name=name,
                 unique_name=name)
             members.append(member)
 
-        print("Creating %s" % struct_name)
+        return members
+
+    def __create_struct_symbol(self, node):
+        struct_name = node.attrib["{%s}%s" % (
+            self.__nsmap['c'], 'type')]
+        filename = self.__get_symbol_filename(struct_name)
+        members = self.__get_structure_members(node,
+                                               filename,
+                                               struct_name)
+
         self.get_or_create_symbol(StructSymbol,
-                display_name=struct_name,
-                unique_name=struct_name,
-                filename=filename, members=members)
-        print("Done!")
+                                  display_name=struct_name,
+                                  unique_name=struct_name,
+                                  anonymous=False,
+                                  filename=filename,
+                                  members=members)
 
     def __create_interface_symbol (self, node, symbol, gi_name):
         iface_name = '%s::%s' % (symbol.unique_name, symbol.unique_name)

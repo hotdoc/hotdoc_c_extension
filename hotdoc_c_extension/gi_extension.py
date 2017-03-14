@@ -312,8 +312,7 @@ class GIExtension(Extension):
 
         self.info('Gathering legacy gtk-doc links')
         self.__scan_sources()
-        #self.project.tree.resolving_symbol_signal.connect (self.__resolving_symbol)
-        #self.app.link_resolver.resolving_link_signal.connect(self.__translate_link_ref)
+        self.app.link_resolver.resolving_link_signal.connect(self.__translate_link_ref)
 
     def format_page(self, page, link_resolver, output):
         link_resolver.get_link_signal.connect(self.search_online_links)
@@ -388,7 +387,7 @@ class GIExtension(Extension):
         gi_name = '.'.join(components)
 
         if node.tag == core_ns('class'):
-            res = self.__create_structure(ClassSymbol, node, gi_name)
+            res = self.__create_structure(True, node, gi_name)
             recurse = False
         elif node.tag in (core_ns('function'), core_ns('method'), core_ns('constructor')):
             res = self.__create_function_symbol(node)
@@ -409,7 +408,7 @@ class GIExtension(Extension):
                 core_ns('package'), core_ns('namespace'), core_ns('doc')):
             pass
         elif node.tag == core_ns('record'):
-            res = self.__create_structure(StructSymbol, node, gi_name)
+            res = self.__create_structure(False, node, gi_name)
             recurse = False
         elif node.tag == core_ns('enumeration'):
             res = self.__create_enum_symbol(node)
@@ -421,7 +420,7 @@ class GIExtension(Extension):
             res = self.__create_callback_symbol(node)
             recurse = False
         elif True:
-            print("%s - %s" % (node.tag, node.text))
+            self.debug("%s - %s" % (node.tag, node.text))
 
         if recurse:
             for cnode in node:
@@ -434,7 +433,6 @@ class GIExtension(Extension):
         parameters_nodes = node.find(core_ns('parameters')) or []
         for child in parameters_nodes:
             parameter = self.__create_parameter_symbol (child)
-            print(parameter)
             parameters.append (parameter[0])
 
         return_type = self.__get_return_type_from_callback(node)
@@ -1118,18 +1116,32 @@ class GIExtension(Extension):
         return self.get_or_create_symbol(AliasSymbol, aliased_type=aliased_type,
                 display_name=name, filename=filename)
 
-    def __create_structure(self, symbol_type, node, gi_name):
+    def __create_structure(self, creating_class, node, gi_name):
         if node.attrib.get(glib_ns('fundamental')) == '1':
             self.debug('%s is a fundamental type, not an actual '
                        'object class' % (node.attrib['name']))
             return
 
         unique_name, unused_name, klass_name = self.__get_symbol_names(node)
+
+        # Hidding class private structures
+        if node.attrib.get('disguised') == '1' and \
+                unique_name.endswith(('Priv', 'Private')):
+            self.debug('%s seems to be a GObject class private structure, hiding it.'
+                       % (unique_name))
+            return
+
         filename = self.__get_symbol_filename(unique_name)
+        if filename == 'Miscellaneous' and not creating_class:
+            instance_struct =  node.attrib.get(glib_ns('is-gtype-struct-for'))
+            if instance_struct:
+                related_klassname = self.__get_namespace(node) + instance_struct
+                sym = self.app.database.get_symbol(related_klassname)
+                if sym:
+                    filename = sym.filename
 
         if filename == 'Miscellaneous':
             filenames = []
-
             for cnode in node:
                 cunique_name = self.__get_symbol_names(cnode)[0]
                 if not cunique_name:
@@ -1165,7 +1177,7 @@ class GIExtension(Extension):
         for cnode in node:
             sym = self.__scan_node(cnode, False)
 
-        if symbol_type == ClassSymbol:
+        if creating_class:
             res = self.__create_class_symbol(node, gi_name,
                                             klass_name,
                                             unique_name,
@@ -1319,81 +1331,6 @@ class GIExtension(Extension):
 
         self.__sort_parameters (func, func.return_value, func.parameters)
         return func
-
-    def __update_struct (self, symbol, node):
-        self.debug('Updating record %s' % symbol.display_name)
-        symbols = []
-
-        components, gi_name = self.__add_translations(symbol.unique_name, node)
-        gi_name = '.'.join(components)
-
-        if node.tag == '{%s}class' % self.__nsmap['core']:
-            symbols.append(self.__create_class_symbol (symbol, gi_name))
-        elif node.tag == '{%s}interface' % self.__nsmap['core']:
-            symbols.append(self.__create_interface_symbol (node, symbol, gi_name))
-
-        klass_name = node.attrib.get('{%s}type-name' %
-                'http://www.gtk.org/introspection/glib/1.0')
-
-        for sig_node in node.findall('./glib:signal',
-                                     namespaces = self.__nsmap):
-            symbols.append(self.__create_signal_symbol(
-                sig_node, klass_name))
-            self.debug("Added signal symbol %s" % sig_node.attrib['name'])
-
-        for prop_node in node.findall('./core:property',
-                                     namespaces = self.__nsmap):
-            symbols.append(self.__create_property_symbol(
-                prop_node, klass_name))
-            self.debug("Added property symbol %s" % prop_node.attrib['name'])
-
-        class_struct_name = node.attrib.get('{%s}type-struct' %
-                self.__nsmap['glib'])
-
-        parent_comment = None
-        if class_struct_name:
-            class_struct_name = '%s%s' % (components[0], class_struct_name)
-            parent_comment = self.app.database.get_comment(class_struct_name)
-
-        vmethods = node.findall('./core:virtual-method',
-                                namespaces = self.__nsmap)
-
-        for vfunc_node in vmethods:
-            sym = self.__create_vfunc_symbol (vfunc_node, klass_name)
-            symbols.append(sym)
-
-            self.debug("Added vmethod symbol %s" % vfunc_node.attrib['name'])
-
-            if parent_comment:
-                comment = parent_comment.params.get (vfunc_node.attrib['name'])
-                if comment:
-                    block = Comment (name=sym.unique_name,
-                                     description=comment.description,
-                                     filename=parent_comment.filename)
-                    self.app.database.add_comment(block)
-
-        return symbols
-
-    def __update_symbol(self, symbol):
-        node = self.__node_cache.get(symbol.unique_name)
-        res = []
-
-        if node is None:
-            return res
-
-        if type(symbol) in (FunctionSymbol, CallbackSymbol):
-            self.__update_function(symbol, node)
-
-        elif type (symbol) in (StructSymbol, AliasSymbol):
-            res = self.__update_struct (symbol, node)
-
-        return res
-
-    def __resolving_symbol (self, page, symbol):
-        if page.extension_name != self.extension_name:
-            return []
-
-        return self.__update_symbol(symbol)
 
     def __rename_page_link (self, page_parser, original_name):
         return self.__translated_names.get(original_name)

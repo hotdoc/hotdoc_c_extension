@@ -417,6 +417,9 @@ class GIExtension(Extension):
         elif node.tag == core_ns('bitfield'):
             res = self.__create_enum_symbol(node)
             recurse = False
+        elif node.tag == core_ns('callback'):
+            res = self.__create_callback_symbol(node)
+            recurse = False
         elif True:
             print("%s - %s" % (node.tag, node.text))
 
@@ -425,6 +428,29 @@ class GIExtension(Extension):
                 self.__scan_node(cnode)
         else:
             return res
+
+    def __create_callback_symbol (self, node):
+        parameters = []
+        parameters_nodes = node.find(core_ns('parameters')) or []
+        for child in parameters_nodes:
+            parameter = self.__create_parameter_symbol (child)
+            print(parameter)
+            parameters.append (parameter[0])
+
+        return_type = self.__get_return_type_from_callback(node)
+        if return_type:
+            tokens = self.__type_tokens_from_cdecl (return_type)
+            return_value = [ReturnItemSymbol(type_tokens=tokens)]
+        else:
+            return_value = [ReturnItemSymbol(type_tokens=[])]
+
+        name = node.attrib[c_ns('type')]
+        filename = self.__get_symbol_filename(name)
+        sym = self.get_or_create_symbol(CallbackSymbol, parameters=parameters,
+                return_value=return_value, display_name=name,
+                filename=filename)
+
+        return sym
 
     def __create_enum_symbol (self, node, spelling=None):
         name = node.attrib[c_ns('type')]
@@ -1176,11 +1202,15 @@ class GIExtension(Extension):
         return array.attrib[c_ns('type')]
 
     def __get_return_type_from_callback(self, node):
-        callback = node.find(core_ns('callback'))
+        if node.tag == core_ns('callback'):
+            callback = node
+        else:
+            callback = node.find(core_ns('callback'))
+
         if callback is None:
             return None
 
-        return_node = node.find(core_ns('callback')).find(core_ns('return-value'))
+        return_node = callback.find(core_ns('return-value'))
         array_type = self.__get_array_type(return_node)
         if array_type:
             return array_type

@@ -257,6 +257,7 @@ class GIExtension(Extension):
         self.c_extension = project.extensions.get('c-extension')
 
         self.__current_output_filename = None
+        self.__class_gtype_structs = {}
 
     @staticmethod
     def add_arguments (parser):
@@ -430,7 +431,9 @@ class GIExtension(Extension):
 
     def __create_callback_symbol (self, node):
         parameters = []
-        parameters_nodes = node.find(core_ns('parameters')) or []
+        parameters_nodes = node.find(core_ns('parameters'))
+        if parameters_nodes is None:
+            parameters_nodes = []
         for child in parameters_nodes:
             parameter = self.__create_parameter_symbol (child)
             parameters.append (parameter[0])
@@ -1133,12 +1136,9 @@ class GIExtension(Extension):
 
         filename = self.__get_symbol_filename(unique_name)
         if filename == 'Miscellaneous' and not creating_class:
-            instance_struct =  node.attrib.get(glib_ns('is-gtype-struct-for'))
-            if instance_struct:
-                related_klassname = self.__get_namespace(node) + instance_struct
-                sym = self.app.database.get_symbol(related_klassname)
-                if sym:
-                    filename = sym.filename
+            sym = self.__class_gtype_structs.get(node.attrib['name'])
+            if sym:
+                filename = sym.filename
 
         if filename == 'Miscellaneous':
             filenames = []
@@ -1182,6 +1182,9 @@ class GIExtension(Extension):
                                             klass_name,
                                             unique_name,
                                             filename)
+            class_struct =  node.attrib.get(glib_ns('type-struct'))
+            if class_struct:
+                self.__class_gtype_structs[class_struct] = res
         else:
             res = self.__create_struct_symbol(node, unique_name)
         self.__current_output_filename = None

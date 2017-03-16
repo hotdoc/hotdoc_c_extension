@@ -65,6 +65,9 @@ from .gi_formatter import GIFormatter
 from .gi_annotation_parser import GIAnnotationParser
 from .fundamentals import PY_FUNDAMENTALS, JS_FUNDAMENTALS
 
+from hotdoc.parsers.gtk_doc import GtkDocParser
+from .utils.utils import CCommentExtractor
+
 
 Logger.register_warning_code('missing-gir-include', BadInclusionException,
                              'gi-extension')
@@ -254,8 +257,6 @@ class GIExtension(Extension):
 
         self.__gen_index_path = None
 
-        self.c_extension = project.extensions.get('c-extension')
-
         self.__current_output_filename = None
         self.__class_gtype_structs = {}
 
@@ -265,6 +266,7 @@ class GIExtension(Extension):
                 DESCRIPTION)
         GIExtension.add_index_argument(group)
         GIExtension.add_sources_argument(group, allow_filters=False)
+        GIExtension.add_sources_argument(group, prefix='gi-c')
         group.add_argument ("--languages", action="store",
                 nargs='*',
                 help="Languages to translate documentation in (c, python,"
@@ -272,6 +274,7 @@ class GIExtension(Extension):
 
     def parse_config(self, config):
         super(GIExtension, self).parse_config(config)
+        self.c_sources = config.get_sources('gi-c_')
         self.languages = [l.lower() for l in config.get(
             'languages', [])]
         # Make sure C always gets formatted first
@@ -280,16 +283,10 @@ class GIExtension(Extension):
             self.languages.insert (0, 'c')
         if not self.languages:
             self.languages = ['c', 'python', 'javascript']
-        if self.sources:
-            self.c_extension.scanner.set_extension(self)
         for gir_file in self.sources:
             gir_root = etree.parse(gir_file).getroot()
             self.__cache_nodes(gir_root)
         self.__create_hierarchies()
-
-    @staticmethod
-    def get_dependencies ():
-        return [ExtDependency('c-extension', is_upstream=True)]
 
     def _make_formatter(self):
         return GIFormatter(self)
@@ -298,8 +295,16 @@ class GIExtension(Extension):
         return 'GObject API Reference'
 
     def _get_all_sources(self):
-        headers = [s for s in self.c_extension.sources if s.endswith('.h')]
-        return headers
+        if self.c_sources:
+            headers = [s for s in self.c_sources if s.endswith('.h')]
+            print(headers)
+            return headers
+        else:
+            # FIXME Keeping backward compatibility
+            # Do we want to keep that?
+             c_extension = self.project.extensions.get('c-extension')
+             if c_extension:
+                return c_extension._get_all_sources()
 
     def setup (self):
         super(GIExtension, self).setup()
@@ -311,6 +316,10 @@ class GIExtension(Extension):
         if not self.sources:
             return
 
+        comment_parser = GtkDocParser(self.project)
+        stale_c, unlisted = self.get_stale_files(self.c_sources)
+        CCommentExtractor(self, comment_parser).parse_comments(
+            stale_c)
         self.info('Gathering legacy gtk-doc links')
         self.__scan_sources()
         self.app.link_resolver.resolving_link_signal.connect(self.__translate_link_ref)

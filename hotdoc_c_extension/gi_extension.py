@@ -297,7 +297,6 @@ class GIExtension(Extension):
     def _get_all_sources(self):
         if self.c_sources:
             headers = [s for s in self.c_sources if s.endswith('.h')]
-            print(headers)
             return headers
         else:
             # FIXME Keeping backward compatibility
@@ -348,9 +347,13 @@ class GIExtension(Extension):
 
     def __get_symbol_names(self, node):
         if node.tag in (core_ns('class')):
-            klass_name = self.__get_klass_name (node)
-            unique_name = '%s' % (klass_name)
-            return unique_name, unique_name, klass_name
+            unique_name = self.__get_klass_name (node)
+
+            return unique_name, unique_name, unique_name
+        elif node.tag in (core_ns('interface')):
+            unique_name = self.__get_klass_name (node)
+
+            return unique_name, unique_name, unique_name
         elif node.tag in (core_ns('function'), core_ns('method'), core_ns('constructor')):
             fname = self.__get_function_name(node)
 
@@ -397,7 +400,7 @@ class GIExtension(Extension):
         gi_name = '.'.join(components)
 
         if node.tag == core_ns('class'):
-            res = self.__create_structure(True, node, gi_name)
+            res = self.__create_structure(ClassSymbol, node, gi_name)
             recurse = False
         elif node.tag in (core_ns('function'), core_ns('method'), core_ns('constructor')):
             res = self.__create_function_symbol(node)
@@ -418,7 +421,10 @@ class GIExtension(Extension):
                 core_ns('package'), core_ns('namespace'), core_ns('doc')):
             pass
         elif node.tag == core_ns('record'):
-            res = self.__create_structure(False, node, gi_name)
+            res = self.__create_structure(StructSymbol, node, gi_name)
+            recurse = False
+        elif node.tag == core_ns('interface'):
+            res = self.__create_structure(InterfaceSymbol, node, gi_name)
             recurse = False
         elif node.tag == core_ns('enumeration'):
             res = self.__create_enum_symbol(node)
@@ -1128,23 +1134,9 @@ class GIExtension(Extension):
         return self.get_or_create_symbol(AliasSymbol, aliased_type=aliased_type,
                 display_name=name, filename=filename)
 
-    def __create_structure(self, creating_class, node, gi_name):
-        if node.attrib.get(glib_ns('fundamental')) == '1':
-            self.debug('%s is a fundamental type, not an actual '
-                       'object class' % (node.attrib['name']))
-            return
-
-        unique_name, unused_name, klass_name = self.__get_symbol_names(node)
-
-        # Hidding class private structures
-        if node.attrib.get('disguised') == '1' and \
-                unique_name.endswith(('Priv', 'Private')):
-            self.debug('%s seems to be a GObject class private structure, hiding it.'
-                       % (unique_name))
-            return
-
+    def __find_structure_pagename(self, node, unique_name, is_class):
         filename = self.__get_symbol_filename(unique_name)
-        if filename == 'Miscellaneous' and not creating_class:
+        if filename == 'Miscellaneous' and not is_class:
             sym = self.__class_gtype_structs.get(node.attrib['name'])
             if sym:
                 filename = sym.filename
@@ -1164,29 +1156,58 @@ class GIExtension(Extension):
 
             unique_filenames = list(OrderedSet(filenames))
             if not filenames:
-                self.warn("no-class-comment",
-                            "No way to determine where %s should land"
-                            " putting it to Miscellaneous for now."
-                            " Please document the class so smart indexing"
-                            " can work properly" % gi_name)
+                # Did not find any symbols, trying to can get information
+                # about the class structure linked to that object class.
+                nextnode = node.getnext()
+                name = node.attrib['name']
+                if nextnode.tag == core_ns('record'):
+                    nextnode_classfor = nextnode.attrib.get(glib_ns(
+                        'is-gtype-struct-for'))
+                    if nextnode_classfor == name:
+                        nunique_name = self.__get_symbol_names(nextnode)[0]
+                        filename = self.__get_symbol_filename(nunique_name)
+
+                if filename == 'Miscellaneous':
+                    self.warn("no-class-comment",
+                                "No way to determine where %s should land"
+                                " putting it to Miscellaneous for now."
+                                " Please document the class so smart indexing"
+                                " can work properly" % unique_name)
             else:
                 filename = unique_filenames[0]
                 if len(unique_filenames) > 1:
                     self.warn("no-class-comment",
                                 " Going wild here to determine where %s needs to land"
                                 " as we could detect the following possibilities: %s."
-                                % (gi_name, unique_filenames))
+                                % (unique_name, unique_filenames))
                 else:
                     self.debug(" No class comment for %s determined that it should"
                                " land into %s with all other class related documentation."
-                               % (gi_name, filename))
+                               % (unique_name, filename))
 
+            return filename
 
+    def __create_structure(self, symbol_type, node, gi_name):
+        if node.attrib.get(glib_ns('fundamental')) == '1':
+            self.debug('%s is a fundamental type, not an actual '
+                       'object class' % (node.attrib['name']))
+            return
+
+        unique_name, unused_name, klass_name = self.__get_symbol_names(node)
+        # Hidding class private structures
+        if node.attrib.get('disguised') == '1' and \
+                unique_name.endswith(('Priv', 'Private')):
+            self.debug('%s seems to be a GObject class private structure, hiding it.'
+                       % (unique_name))
+            return
+
+        filename = self.__find_structure_pagename(node, unique_name,
+                                                  symbol_type == ClassSymbol)
         self.__current_output_filename = filename
         for cnode in node:
             sym = self.__scan_node(cnode, False)
 
-        if creating_class:
+        if symbol_type == ClassSymbol:
             res = self.__create_class_symbol(node, gi_name,
                                             klass_name,
                                             unique_name,
@@ -1194,12 +1215,16 @@ class GIExtension(Extension):
             class_struct =  node.attrib.get(glib_ns('type-struct'))
             if class_struct:
                 self.__class_gtype_structs[class_struct] = res
-        else:
+        elif symbol_type == StructSymbol:
             res = self.__create_struct_symbol(node, unique_name)
+        else:  # Interface
+            res = self.__create_interface_symbol(node, unique_name)
+            class_struct =  node.attrib.get(glib_ns('type-struct'))
+            if class_struct:
+                self.__class_gtype_structs[class_struct] = res
         self.__current_output_filename = None
 
         return res
-
 
     def __create_class_symbol (self, node, gi_name, klass_name,
                                unique_name, filename):
@@ -1284,12 +1309,11 @@ class GIExtension(Extension):
                                   filename=filename,
                                   members=members)
 
-    def __create_interface_symbol (self, node, symbol, gi_name):
-        iface_name = '%s::%s' % (symbol.unique_name, symbol.unique_name)
-
+    def __create_interface_symbol (self, node, unique_name):
+        nextnode = node.getnext()
         return self.get_or_create_symbol(InterfaceSymbol,
-                display_name=symbol.display_name,
-                unique_name=iface_name)
+                display_name=unique_name,
+                unique_name=unique_name)
 
     def __get_gi_name_components(self, node):
         parent = node.getparent()

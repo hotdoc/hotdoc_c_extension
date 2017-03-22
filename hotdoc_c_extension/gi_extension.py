@@ -18,31 +18,9 @@
 
 """A gobject-introspection extension for Hotdoc.
 
-This extension is implemented as a just-in-time "scanner".
-
-There is nearly no initial scanning done, as we limit
-ourselves to caching all the interesting gir nodes (function
-nodes, class nodes etc ..), and creating the class hierarchy
-graph.
-
-Instead of creating symbols at setup time, we create them
-at symbol resolution time, as the symbol for a given class
-will always be located in the same page as its C structure.
-
-For example, given a "TestGreeter" object, the C extension
-will create the StructSymbol for TestGreeter, and we
-will create the "TestGreeter::TestGreeter" class symbol when
-the containing page for TestGreeter will have its symbols
-resolved (ie during the initial build of the documentation,
-or when the page is stale). All properties, signals and
-virtual methods attached to this class are added too.
-
-We will also update all the callables at resolution time,
-to add gi-specific attributes to them, which the
-GIFormatter will make sense of at format-time.
-
-This approach allows incremental rebuilding to be way faster
-than the initial build.
+This extension parses a .gir file and extract comments from specified
+source files. Parsing the comments ourself allows us to smartly build
+the index based on the comments location.
 """
 
 import os

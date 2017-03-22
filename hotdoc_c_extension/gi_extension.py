@@ -1136,56 +1136,61 @@ class GIExtension(Extension):
 
     def __find_structure_pagename(self, node, unique_name, is_class):
         filename = self.__get_symbol_filename(unique_name)
-        if filename == 'Miscellaneous' and not is_class:
+        if filename not in ['Miscellaneous', None]:
+            return filename
+
+        if not is_class:
             sym = self.__class_gtype_structs.get(node.attrib['name'])
             if sym:
                 filename = sym.filename
 
-        if filename == 'Miscellaneous':
-            filenames = []
-            for cnode in node:
-                cunique_name = self.__get_symbol_names(cnode)[0]
-                if not cunique_name:
-                    continue
-                fname = self.__get_symbol_filename(cunique_name)
-                if fname != 'Miscellaneous':
-                    if cnode.tag == core_ns('constructor'):
-                        filenames.insert(0, fname)
-                    else:
-                        filenames.append(fname)
-
-            unique_filenames = list(OrderedSet(filenames))
-            if not filenames:
-                # Did not find any symbols, trying to can get information
-                # about the class structure linked to that object class.
-                nextnode = node.getnext()
-                name = node.attrib['name']
-                if nextnode.tag == core_ns('record'):
-                    nextnode_classfor = nextnode.attrib.get(glib_ns(
-                        'is-gtype-struct-for'))
-                    if nextnode_classfor == name:
-                        nunique_name = self.__get_symbol_names(nextnode)[0]
-                        filename = self.__get_symbol_filename(nunique_name)
-
-                if filename == 'Miscellaneous':
-                    self.warn("no-class-comment",
-                                "No way to determine where %s should land"
-                                " putting it to Miscellaneous for now."
-                                " Please document the class so smart indexing"
-                                " can work properly" % unique_name)
-            else:
-                filename = unique_filenames[0]
-                if len(unique_filenames) > 1:
-                    self.warn("no-class-comment",
-                                " Going wild here to determine where %s needs to land"
-                                " as we could detect the following possibilities: %s."
-                                % (unique_name, unique_filenames))
-                else:
-                    self.debug(" No class comment for %s determined that it should"
-                               " land into %s with all other class related documentation."
-                               % (unique_name, filename))
-
+        if filename not in ['Miscellaneous', None]:
             return filename
+
+        filenames = []
+        for cnode in node:
+            cunique_name = self.__get_symbol_names(cnode)[0]
+            if not cunique_name:
+                continue
+            fname = self.__get_symbol_filename(cunique_name)
+            if fname not in ['Miscellaneous', None]:
+                if cnode.tag == core_ns('constructor'):
+                    filenames.insert(0, fname)
+                else:
+                    filenames.append(fname)
+
+        unique_filenames = list(OrderedSet(filenames))
+        if not filenames:
+            # Did not find any symbols, trying to can get information
+            # about the class structure linked to that object class.
+            nextnode = node.getnext()
+            name = node.attrib['name']
+            if nextnode.tag == core_ns('record'):
+                nextnode_classfor = nextnode.attrib.get(glib_ns(
+                    'is-gtype-struct-for'))
+                if nextnode_classfor == name:
+                    nunique_name = self.__get_symbol_names(nextnode)[0]
+                    filename = self.__get_symbol_filename(nunique_name)
+
+            if filename == 'Miscellaneous':
+                self.warn("no-class-comment",
+                            "No way to determine where %s should land"
+                            " putting it to Miscellaneous for now."
+                            " Please document the class so smart indexing"
+                            " can work properly" % unique_name)
+        else:
+            filename = unique_filenames[0]
+            if len(unique_filenames) > 1:
+                self.warn("no-class-comment",
+                            " Going wild here to determine where %s needs to land"
+                            " as we could detect the following possibilities: %s."
+                            % (unique_name, unique_filenames))
+            else:
+                self.debug(" No class comment for %s determined that it should"
+                            " land into %s with all other class related documentation."
+                            % (unique_name, filename))
+
+        return filename
 
     def __create_structure(self, symbol_type, node, gi_name):
         if node.attrib.get(glib_ns('fundamental')) == '1':

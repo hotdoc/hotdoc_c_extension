@@ -71,7 +71,7 @@ from .utils.utils import CCommentExtractor
 
 Logger.register_warning_code('missing-gir-include', BadInclusionException,
                              'gi-extension')
-Logger.register_warning_code('no-class-comment', InvalidOutputException,
+Logger.register_warning_code('no-location-indication', InvalidOutputException,
                              'gi-extension')
 
 class Flag (object):
@@ -152,62 +152,16 @@ def c_ns(tag):
     return '{http://www.gtk.org/introspection/c/1.0}%s' % tag
 
 
-class SymbolTarget:
-    def __init__(self, extension):
-        self.extension = extension
-        self.__smart_key_stack = []
-        self.__nsmap = {'core': 'http://www.gtk.org/introspection/core/1.0',
-                        'c': 'http://www.gtk.org/introspection/c/1.0',
-                        'glib': 'http://www.gtk.org/introspection/glib/1.0'}
+DEFAULT_PAGE = "Miscellaneous.default_page"
+DEFAULT_PAGE_COMMENT = """/**
+* Miscellaneous.default_page:
+* @title: Miscellaneous
+* @short-description: Miscellaneous unordered symbols
+*
+* Unordered miscellaneous symbols that were not properly documented
+*/
+"""
 
-    def start (self, tag, attrib):
-        tag = tag.split('}')[1]
-        try:
-            func = getattr(self, 'start_%s' % tag)
-        except AttributeError:
-            return
-
-        func(attrib)
-
-    def end (self, tag):
-        tag = tag.split('}')[1]
-        try:
-            func = getattr(self, 'end_%s' % tag)
-        except AttributeError:
-            return
-
-        func()
-
-    def __get_klass_name(self, attrib):
-        klass_name = attrib.get('{%s}type' % self.__nsmap['c'])
-        if not klass_name:
-            klass_name = attrib.get('{%s}type-name' % self.__nsmap['glib'])
-        return klass_name
-
-    def start_class(self, attrib):
-        name = self.__get_klass_name(attrib)
-        unique_name = '%s::%s' % (name, name)
-        comment = self.extension.app.database.get_comment(unique_name)
-        if comment:
-            smart_key = '%s.h' % os.path.splitext(comment.filename)[0]
-        else:
-            smart_key = unique_name
-
-        self.__smart_key_stack.append(smart_key)
-
-        self.extension.get_or_create_symbol(ClassSymbol,
-                                            display_name=name,
-                                            unique_name=unique_name,
-                                            extra={'gi-smart-key': smart_key})
-
-    def end_class(self):
-        self.__smart_key_stack.pop()
-
-    def start_function(self, attrib):
-        pass
-
-    def close (self):
-        return 0
 
 class GIExtension(Extension):
     extension_name = "gi-extension"
@@ -259,6 +213,7 @@ class GIExtension(Extension):
 
         self.__current_output_filename = None
         self.__class_gtype_structs = {}
+        self.__default_page = DEFAULT_PAGE
 
     @staticmethod
     def add_arguments (parser):
@@ -305,7 +260,18 @@ class GIExtension(Extension):
              if c_extension:
                 return c_extension._get_all_sources()
 
+    def __find_package_root(self):
+        if self.__package_root:
+            return
+
+        commonprefix = os.path.commonprefix(list(self._get_all_sources()))
+        self.__package_root = os.path.dirname(commonprefix)
+
     def setup (self):
+        commonprefix = os.path.commonprefix(list(self._get_all_sources()))
+        self.__default_page = os.path.join(os.path.dirname(commonprefix),
+            DEFAULT_PAGE)
+
         super(GIExtension, self).setup()
 
         if not self.__gathered_gtk_doc_links:
@@ -315,13 +281,19 @@ class GIExtension(Extension):
         if not self.sources:
             return
 
-        comment_parser = GtkDocParser(self.project)
-        stale_c, unlisted = self.get_stale_files(self.c_sources)
-        CCommentExtractor(self, comment_parser).parse_comments(
-            stale_c)
+        self.__scan_comments()
         self.info('Gathering legacy gtk-doc links')
         self.__scan_sources()
         self.app.link_resolver.resolving_link_signal.connect(self.__translate_link_ref)
+
+    def __scan_comments(self):
+        comment_parser = GtkDocParser(self.project)
+        block = comment_parser.parse_comment(DEFAULT_PAGE_COMMENT,
+                                             DEFAULT_PAGE, 0, 0)
+        self.app.database.add_comment(block)
+
+        stale_c, unlisted = self.get_stale_files(self.c_sources)
+        CCommentExtractor(self, comment_parser).parse_comments(stale_c)
 
     def format_page(self, page, link_resolver, output):
         link_resolver.get_link_signal.connect(self.search_online_links)
@@ -483,6 +455,63 @@ class GIExtension(Extension):
         return self.get_or_create_symbol(EnumSymbol, members=members,
                                   anonymous=False, display_name=name,
                                   filename=filename, raw_text=None)
+
+    def __find_structure_pagename(self, node, unique_name, is_class):
+        filename = self.__get_symbol_filename(unique_name)
+        if filename != self.__default_page:
+            return filename
+
+        if not is_class:
+            sym = self.__class_gtype_structs.get(node.attrib['name'])
+            if sym and sym.filename:
+                return sym.filename
+            if sym:
+                import ipdb; ipdb.set_trace()
+
+        filenames = []
+        for cnode in node:
+            cunique_name = self.__get_symbol_names(cnode)[0]
+            if not cunique_name:
+                continue
+            fname = self.__get_symbol_filename(cunique_name)
+            if fname != self.__default_page:
+                if cnode.tag == core_ns('constructor'):
+                    filenames.insert(0, fname)
+                else:
+                    filenames.append(fname)
+
+        unique_filenames = list(OrderedSet(filenames))
+        if not filenames:
+            # Did not find any symbols, trying to can get information
+            # about the class structure linked to that object class.
+            nextnode = node.getnext()
+            name = node.attrib['name']
+            if nextnode.tag == core_ns('record'):
+                nextnode_classfor = nextnode.attrib.get(glib_ns(
+                    'is-gtype-struct-for'))
+                if nextnode_classfor == name:
+                    nunique_name = self.__get_symbol_names(nextnode)[0]
+                    filename = self.__get_symbol_filename(nunique_name)
+
+            if filename == self.__default_page:
+                self.warn("no-location-indication",
+                          "No way to determine where %s should land"
+                          " putting it to %s for now."
+                          " Please document the class so smart indexing"
+                          " can work properly." % (unique_name, filename))
+        else:
+            filename = unique_filenames[0]
+            if len(unique_filenames) > 1:
+                self.warn("no-location-indication",
+                          " Going wild here to determine where %s needs to land"
+                          " as we could detect the following possibilities: %s."
+                          % (unique_name, unique_filenames))
+            else:
+                self.debug(" No class comment for %s determined that it should"
+                            " land into %s with all other class related documentation."
+                            % (unique_name, filename))
+
+        return filename
 
     def __find_gir_file(self, gir_name):
         for source in self.sources:
@@ -865,6 +894,13 @@ class GIExtension(Extension):
             if name in ('__inst', '__t', '__r'):
                 return None
 
+        if kwargs.get('filename') == self.__default_page:
+            self.warn("no-location-indication",
+                       "No way to determine where %s should land"
+                       " putting it to %s for now."
+                       " Please document the symbol so smart indexing"
+                       " can work properly." % (name, self.__default_page))
+
         return super(GIExtension, self).get_or_create_symbol(*args, **kwargs)
 
     # We implement filtering of some symbols
@@ -1122,7 +1158,7 @@ class GIExtension(Extension):
         if comment:
             return '%s.h' % os.path.splitext(comment.filename)[0]
 
-        return 'Miscellaneous'
+        return self.__default_page
 
     def __create_alias_symbol (self, node, gi_name):
         name = self.__get_symbol_names(node)[0]
@@ -1133,64 +1169,6 @@ class GIExtension(Extension):
 
         return self.get_or_create_symbol(AliasSymbol, aliased_type=aliased_type,
                 display_name=name, filename=filename)
-
-    def __find_structure_pagename(self, node, unique_name, is_class):
-        filename = self.__get_symbol_filename(unique_name)
-        if filename not in ['Miscellaneous', None]:
-            return filename
-
-        if not is_class:
-            sym = self.__class_gtype_structs.get(node.attrib['name'])
-            if sym:
-                filename = sym.filename
-
-        if filename not in ['Miscellaneous', None]:
-            return filename
-
-        filenames = []
-        for cnode in node:
-            cunique_name = self.__get_symbol_names(cnode)[0]
-            if not cunique_name:
-                continue
-            fname = self.__get_symbol_filename(cunique_name)
-            if fname not in ['Miscellaneous', None]:
-                if cnode.tag == core_ns('constructor'):
-                    filenames.insert(0, fname)
-                else:
-                    filenames.append(fname)
-
-        unique_filenames = list(OrderedSet(filenames))
-        if not filenames:
-            # Did not find any symbols, trying to can get information
-            # about the class structure linked to that object class.
-            nextnode = node.getnext()
-            name = node.attrib['name']
-            if nextnode.tag == core_ns('record'):
-                nextnode_classfor = nextnode.attrib.get(glib_ns(
-                    'is-gtype-struct-for'))
-                if nextnode_classfor == name:
-                    nunique_name = self.__get_symbol_names(nextnode)[0]
-                    filename = self.__get_symbol_filename(nunique_name)
-
-            if filename == 'Miscellaneous':
-                self.warn("no-class-comment",
-                            "No way to determine where %s should land"
-                            " putting it to Miscellaneous for now."
-                            " Please document the class so smart indexing"
-                            " can work properly" % unique_name)
-        else:
-            filename = unique_filenames[0]
-            if len(unique_filenames) > 1:
-                self.warn("no-class-comment",
-                            " Going wild here to determine where %s needs to land"
-                            " as we could detect the following possibilities: %s."
-                            % (unique_name, unique_filenames))
-            else:
-                self.debug(" No class comment for %s determined that it should"
-                            " land into %s with all other class related documentation."
-                            % (unique_name, filename))
-
-        return filename
 
     def __create_structure(self, symbol_type, node, gi_name):
         if node.attrib.get(glib_ns('fundamental')) == '1':
@@ -1208,6 +1186,7 @@ class GIExtension(Extension):
 
         filename = self.__find_structure_pagename(node, unique_name,
                                                   symbol_type == ClassSymbol)
+
         self.__current_output_filename = filename
         for cnode in node:
             sym = self.__scan_node(cnode, False)
@@ -1221,9 +1200,9 @@ class GIExtension(Extension):
             if class_struct:
                 self.__class_gtype_structs[class_struct] = res
         elif symbol_type == StructSymbol:
-            res = self.__create_struct_symbol(node, unique_name)
+            res = self.__create_struct_symbol(node, unique_name, filename)
         else:  # Interface
-            res = self.__create_interface_symbol(node, unique_name)
+            res = self.__create_interface_symbol(node, unique_name, filename)
             class_struct =  node.attrib.get(glib_ns('type-struct'))
             if class_struct:
                 self.__class_gtype_structs[class_struct] = res
@@ -1301,8 +1280,7 @@ class GIExtension(Extension):
 
         return members
 
-    def __create_struct_symbol(self, node, struct_name):
-        filename = self.__get_symbol_filename(struct_name)
+    def __create_struct_symbol(self, node, struct_name, filename):
         members = self.__get_structure_members(node,
                                                filename,
                                                struct_name)
@@ -1314,11 +1292,12 @@ class GIExtension(Extension):
                                   filename=filename,
                                   members=members)
 
-    def __create_interface_symbol (self, node, unique_name):
+    def __create_interface_symbol (self, node, unique_name, filename):
         nextnode = node.getnext()
         return self.get_or_create_symbol(InterfaceSymbol,
                 display_name=unique_name,
-                unique_name=unique_name)
+                unique_name=unique_name,
+                filename=filename)
 
     def __get_gi_name_components(self, node):
         parent = node.getparent()

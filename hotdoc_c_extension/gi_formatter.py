@@ -183,8 +183,9 @@ class GIFormatter(Formatter):
 
         return out
 
-    def get_output_folder(self):
-        return self.extension.language or self.extension.languages[0]
+    def get_output_folder(self, page):
+        lang_path = self.extension.language or self.extension.languages[0]
+        return os.path.join(super().get_output_folder(page), lang_path)
 
     def patch_page(self, page, symbol, output):
         symbol.update_children_comments()

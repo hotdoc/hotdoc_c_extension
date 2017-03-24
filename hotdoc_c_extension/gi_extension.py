@@ -1133,7 +1133,7 @@ class GIExtension(Extension):
             return self.__current_output_filename
 
         comment = self.app.database.get_comment(unique_name)
-        if comment:
+        if comment and comment.filename:
             return '%s.h' % os.path.splitext(comment.filename)[0]
 
         return self.__default_page

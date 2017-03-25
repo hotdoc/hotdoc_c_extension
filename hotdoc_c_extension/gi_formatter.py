@@ -152,7 +152,7 @@ class GIFormatter(Formatter):
         members_list = self._format_members_list (struct.members, 'Attributes')
 
         template = self.engine.get_template ("python_compound.html")
-        out = template.render ({"compound": struct,
+        out = template.render ({"symbol": struct,
                                 "members_list": members_list})
         return (out, False)
 

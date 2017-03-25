@@ -239,7 +239,7 @@ class GIExtension(Extension):
 
     def format_page(self, page, link_resolver, output):
         link_resolver.get_link_signal.connect(self.search_online_links)
-        self.c_extension.formatter.formatting_symbol_signal.connect(self.__formatting_symbol)
+        self.formatter.formatting_symbol_signal.connect(self.__formatting_symbol)
         page.meta['extra']['gi-languages'] = ','.join(self.languages)
         for l in self.languages:
             page.meta['extra']['gi-language'] = l
@@ -249,7 +249,7 @@ class GIExtension(Extension):
         self.setup_language(None)
 
         link_resolver.get_link_signal.disconnect(self.search_online_links)
-        self.c_extension.formatter.formatting_symbol_signal.disconnect(self.__formatting_symbol)
+        self.formatter.formatting_symbol_signal.disconnect(self.__formatting_symbol)
 
     def __find_gir_file(self, gir_name):
         for source in self.sources:

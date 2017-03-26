@@ -287,6 +287,10 @@ class GIExtension(Extension):
         link_resolver.get_link_signal.disconnect(self.search_online_links)
         self.formatter.formatting_symbol_signal.disconnect(self.__formatting_symbol)
 
+    @staticmethod
+    def get_dependencies ():
+        return [ExtDependency('c-extension', is_upstream=True, optional=True)]
+
     def __scan_sources(self):
         for gir_file in self.sources:
             root = etree.parse(gir_file).getroot()

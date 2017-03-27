@@ -207,7 +207,7 @@ class GIExtension(Extension):
 
     def parse_config(self, config):
         super(GIExtension, self).parse_config(config)
-        self.c_sources = config.get_sources('gi-c_')
+        self.c_sources = config.get_sources('gi-c')
         self.languages = [l.lower() for l in config.get(
             'languages', [])]
         # Make sure C always gets formatted first

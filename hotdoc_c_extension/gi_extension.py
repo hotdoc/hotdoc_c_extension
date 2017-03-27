@@ -348,55 +348,37 @@ class GIExtension(Extension):
 
         return None, None, None
 
-    def __scan_node(self, node, recurse=True):
+    def __scan_node(self, node):
         components = self.__get_gi_name_components(node)
-        res = None
         gi_name = '.'.join(components)
 
         if node.tag == core_ns('class'):
             res = self.__create_structure(ClassSymbol, node, gi_name)
-            recurse = False
         elif node.tag in (core_ns('function'), core_ns('method'), core_ns('constructor')):
             res = self.__create_function_symbol(node)
-            recurse = False
         elif node.tag == core_ns('virtual-method'):
             res = self.__create_vfunc_symbol(node)
-            recurse = False
         elif node.tag == core_ns('property'):
             res = self.__create_property_symbol(node)
-            recurse = False
         elif node.tag == glib_ns('signal'):
             res = self.__create_signal_symbol(node)
-            recurse = False
         elif node.tag == core_ns('alias'):
             res = self.__create_alias_symbol(node, gi_name)
-            recurse = False
-        elif node.tag in (core_ns('repository'), core_ns('include'),
-                core_ns('package'), core_ns('namespace'), core_ns('doc')):
-            pass
         elif node.tag == core_ns('record'):
             res = self.__create_structure(StructSymbol, node, gi_name)
-            recurse = False
         elif node.tag == core_ns('interface'):
             res = self.__create_structure(InterfaceSymbol, node, gi_name)
-            recurse = False
         elif node.tag == core_ns('enumeration'):
             res = self.__create_enum_symbol(node)
-            recurse = False
         elif node.tag == core_ns('bitfield'):
             res = self.__create_enum_symbol(node)
-            recurse = False
         elif node.tag == core_ns('callback'):
             res = self.__create_callback_symbol(node)
-            recurse = False
-        elif True:
-            self.debug("%s - %s" % (node.tag, node.text))
-
-        if recurse:
+        elif node.tag == core_ns('field'):
+            pass
+        else:
             for cnode in node:
                 self.__scan_node(cnode)
-        else:
-            return res
 
     def __create_callback_symbol (self, node):
         parameters = []
@@ -1120,7 +1102,23 @@ class GIExtension(Extension):
         return res
 
     def __create_vfunc_symbol (self, node):
+        klass_node = node.getparent()
+        ns = klass_node.getparent()
+        gtype_struct = klass_node.attrib.get(glib_ns('type-struct'))
+
+        klass_comment = self.app.database.get_comment('%s%s' %
+            (ns.attrib['name'], gtype_struct))
+
         unique_name, name, klass_name = self.__get_symbol_names(node)
+
+        if klass_comment:
+            param_comment = klass_comment.params.get(name)
+            if (param_comment):
+                self.app.database.add_comment(
+                    Comment(name=unique_name,
+                            description=param_comment.description,
+                            annotations=param_comment.annotations))
+
         parameters, retval = self.__create_parameters_and_retval (node)
         symbol = self.get_or_create_symbol(VFunctionSymbol,
                 parameters=parameters,
@@ -1171,7 +1169,7 @@ class GIExtension(Extension):
 
         self.__current_output_filename = filename
         for cnode in node:
-            sym = self.__scan_node(cnode, False)
+            self.__scan_node(cnode)
 
         if symbol_type == ClassSymbol:
             res = self.__create_class_symbol(node, gi_name,
@@ -1217,15 +1215,7 @@ class GIExtension(Extension):
         return array.attrib[c_ns('type')]
 
     def __get_return_type_from_callback(self, node):
-        if node.tag == core_ns('callback'):
-            callback = node
-        else:
-            callback = node.find(core_ns('callback'))
-
-        if callback is None:
-            return None
-
-        return_node = callback.find(core_ns('return-value'))
+        return_node = node.find(core_ns('return-value'))
         array_type = self.__get_array_type(return_node)
         if array_type:
             return array_type
@@ -1235,26 +1225,26 @@ class GIExtension(Extension):
     def __get_structure_members(self, node, filename, struct_name):
         members = []
         for field in node.findall(core_ns('field')):
-            is_function_pointer = False
-            field_name = field.attrib['name']
+            # Weed out vmethods, handled separately
+            children = field.getchildren()
+            if not children:
+                continue
+            if children[0].tag == core_ns('callback'):
+                continue
 
-            callback_return_type = self.__get_return_type_from_callback(field)
-            if callback_return_type:
-                is_function_pointer = True
-                type_ = callback_return_type
+            field_name = field.attrib['name']
+            array_type = self.__get_array_type(field)
+            if array_type:
+                type_ = array_type
             else:
-                array_type = self.__get_array_type(field)
-                if array_type:
-                    type_ = array_type
-                else:
-                    type_ = field.find(core_ns('type')).attrib[c_ns('type')]
+                type_ = field.find(core_ns('type')).attrib[c_ns('type')]
 
             tokens = self.__type_tokens_from_cdecl (type_)
 
             name = "%s.%s" % (struct_name, field_name)
             qtype = QualifiedSymbol(type_tokens=tokens)
             member = self.get_or_create_symbol(
-                FieldSymbol, is_function_pointer=is_function_pointer,
+                FieldSymbol,
                 member_name=field_name, qtype=qtype,
                 filename=filename, display_name=name,
                 unique_name=name)

@@ -435,7 +435,7 @@ class GIExtension(Extension):
 
             self.__gtkdoc_hrefs[name] = online + link
 
-        self.debug('Gathered %d links from devhelp index %s' % (len(keywords), path)) 
+        self.debug('Gathered %d links from devhelp index %s' % (len(keywords), path))
 
         return True
 
@@ -465,7 +465,7 @@ class GIExtension(Extension):
                     n_links += 1
 
         if n_links > 0:
-            self.debug('Gathered %d links from sgml index %s' % (n_links, path)) 
+            self.debug('Gathered %d links from sgml index %s' % (n_links, path))
 
     def __add_annotations (self, formatter, symbol):
         if self.language == 'c':
@@ -510,6 +510,9 @@ class GIExtension(Extension):
         return True
 
     def insert_language(self, ref, language):
+        if not ref.startswith(self.project.sanitized_name + '/'):
+            return language + '/' + ref
+
         p = pathlib.Path(ref)
         return str(pathlib.Path(p.parts[0], language, *p.parts[1:]))
 
@@ -876,7 +879,7 @@ class GIExtension(Extension):
 
         parameters, retval = self.__create_parameters_and_retval (node)
         symbol = self.get_or_create_symbol(VFunctionSymbol,
-                parameters=parameters, 
+                parameters=parameters,
                 return_value=retval, display_name=name,
                 unique_name=unique_name)
 
@@ -918,7 +921,7 @@ class GIExtension(Extension):
         id_key = '{%s}identifier' % self.__nsmap['c']
         id_type = '{%s}type' % self.__nsmap['c']
 
-        components = self.__get_gi_name_components(node) 
+        components = self.__get_gi_name_components(node)
         gi_name = '.'.join(components)
 
         if id_key in node.attrib:

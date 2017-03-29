@@ -429,8 +429,6 @@ class GIExtension(Extension):
             sym = self.__class_gtype_structs.get(node.attrib['name'])
             if sym and sym.filename:
                 return sym.filename
-            if sym:
-                import ipdb; ipdb.set_trace()
 
         filenames = []
         for cnode in node:
@@ -450,7 +448,7 @@ class GIExtension(Extension):
             # about the class structure linked to that object class.
             nextnode = node.getnext()
             name = node.attrib['name']
-            if nextnode.tag == core_ns('record'):
+            if nextnode and nextnode.tag == core_ns('record'):
                 nextnode_classfor = nextnode.attrib.get(glib_ns(
                     'is-gtype-struct-for'))
                 if nextnode_classfor == name:

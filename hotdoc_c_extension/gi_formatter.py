@@ -27,6 +27,7 @@ class GIFormatter(Formatter):
         module_path = os.path.dirname(__file__)
         searchpath = [os.path.join(module_path, "templates")]
         Formatter.__init__(self, gi_extension, searchpath)
+        self._order_by_parent = True
 
     def format_annotations (self, annotations):
         template = self.engine.get_template('gi_annotations.html')

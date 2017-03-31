@@ -546,7 +546,6 @@ class CExtension(Extension):
             CExtension.connected = True
         self.scanner = ClangScanner(self.app, self.project, self)
 
-    # pylint: disable=no-self-use
     def __include_file_cb(self, include_path, line_ranges, symbol_name):
         if not include_path.endswith(".c") or not symbol_name:
             return None

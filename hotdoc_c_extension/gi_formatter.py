@@ -48,7 +48,8 @@ class GIFormatter(Formatter):
             return Formatter._format_type_tokens (self, new_tokens)
         return Formatter._format_type_tokens (self, type_tokens)
 
-    def _format_return_value_symbol (self, retval):
+    def _format_return_value_symbol (self, *args):
+        retval = args[0]
         is_void = retval[0] is None or \
                 retval[0].get_extension_attribute('gi-extension',
                         'gi_name') == 'none'
@@ -61,7 +62,7 @@ class GIFormatter(Formatter):
         elif is_void:
             retval = retval[1:] or [None]
 
-        return Formatter._format_return_value_symbol (self, retval)
+        return Formatter._format_return_value_symbol (self, *args)
 
     def _format_parameter_symbol (self, parameter):
         if self.extension.language != 'c':
@@ -147,10 +148,11 @@ class GIFormatter(Formatter):
         return self._format_callable (vmethod, "virtual method",
                 title)
 
-    def _format_struct (self, struct):
+    def _format_struct (self, struct,):
         if self.extension.language == 'c':
             return Formatter._format_struct (self, struct)
-        members_list = self._format_members_list (struct.members, 'Attributes')
+        members_list = self._format_members_list (struct.members, 'Attributes',
+                                                  struct)
 
         template = self.engine.get_template ("python_compound.html")
         out = template.render ({"symbol": struct,

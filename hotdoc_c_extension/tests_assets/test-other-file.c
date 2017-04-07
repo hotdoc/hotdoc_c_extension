@@ -1,4 +1,4 @@
-#include "test other-file.h"
+#include "test-other-file.h"
 
 /**
  * test_bar_ze_foo:

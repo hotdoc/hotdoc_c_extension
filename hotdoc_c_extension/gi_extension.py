@@ -299,6 +299,9 @@ class GIExtension(Extension):
     def __core_ns(self, tag):
         return '{%s}%s' % tag, self.__nsmap['core']
 
+    def __get_structure_name(self, node):
+        return node.attrib[c_ns('type')]
+
     def __get_symbol_names(self, node):
         if node.tag in (core_ns('class')):
             unique_name = self.__get_klass_name (node)
@@ -313,12 +316,25 @@ class GIExtension(Extension):
 
             return fname, fname, fname
         elif node.tag == core_ns('virtual-method'):
-            parent_name = self.__get_klass_name(node.getparent())
-            klass_name = '%s::%s' % (parent_name, parent_name)
+            klass_node = node.getparent()
+            ns = klass_node.getparent()
+            print('./*[@glib:is-gtype-struct-for="%s"]' % klass_node.attrib['name'])
+            klass_structure_node = ns.xpath(
+                './*[@glib:is-gtype-struct-for="%s"]' % klass_node.attrib['name'],
+                namespaces=self._GIExtension__nsmap)[0]
+            parent_name = self.__get_structure_name(klass_structure_node)
             name = node.attrib['name']
-            unique_name = '%s:::%s' % (parent_name, name)
+            unique_name = '%s::%s' % (parent_name, name)
+            display_name = '%s.%s' % (parent_name, name)
 
-            return unique_name, name, klass_name
+            return unique_name, display_name, unique_name
+        elif node.tag == core_ns('field'):
+            structure_node = node.getparent()
+            parent_name = self.__get_structure_name(structure_node)
+            name = node.attrib['name']
+            unique_name = '%s::%s' % (parent_name, name)
+
+            return unique_name, name, unique_name
         elif node.tag == core_ns('property'):
             parent_name = self.__get_klass_name(node.getparent())
             klass_name = '%s::%s' % (parent_name, parent_name)
@@ -338,7 +354,7 @@ class GIExtension(Extension):
 
             return name, name, name
         elif node.tag == core_ns('record'):
-            name = node.attrib["{%s}%s" % (self.__nsmap['c'], 'type')]
+            name = self.__get_structure_name(node)
 
             return name, name, name
         elif node.tag in (core_ns('enumeration'), core_ns('bitfield')):
@@ -458,9 +474,9 @@ class GIExtension(Extension):
             if filename == self.__default_page:
                 self.warn("no-location-indication",
                           "No way to determine where %s should land"
-                          " putting it to %s for now."
-                          " Please document the class so smart indexing"
-                          " can work properly." % (unique_name, filename))
+                          " putting it to %s."
+                          " Document the symbol for smart indexing to work" % (
+                              unique_name, os.path.basename(filename)))
         else:
             filename = unique_filenames[0]
             if len(unique_filenames) > 1:
@@ -471,7 +487,7 @@ class GIExtension(Extension):
             else:
                 self.debug(" No class comment for %s determined that it should"
                             " land into %s with all other class related documentation."
-                            % (unique_name, filename))
+                            % (unique_name, os.path.basename(filename)))
 
         return filename
 
@@ -544,8 +560,7 @@ class GIExtension(Extension):
         for node in gir_root.xpath(
                 './/core:virtual-method',
                 namespaces=self.__nsmap):
-            name = '%s:::%s' % (self.__get_klass_name(node.getparent()),
-                                node.attrib['name'])
+            name = self.__get_symbol_names(node)[0]
             self.__node_cache[name] = node
 
         for inc in gir_root.findall('./core:include',
@@ -859,9 +874,9 @@ class GIExtension(Extension):
         if kwargs.get('filename') == self.__default_page:
             self.warn("no-location-indication",
                        "No way to determine where %s should land"
-                       " putting it to %s for now."
-                       " Please document the symbol so smart indexing"
-                       " can work properly." % (name, self.__default_page))
+                       " putting it to %s."
+                       " Document the symbol for smart indexing to work" % (
+                           name, os.path.basename(self.__default_page)))
 
         return super(GIExtension, self).get_or_create_symbol(*args, **kwargs)
 
@@ -1125,7 +1140,8 @@ class GIExtension(Extension):
                 return_value=retval, display_name=name,
                 unique_name=unique_name,
                 filename=self.__get_symbol_filename(klass_name),
-                parent_name=parent_name)
+                parent_name=parent_name,
+                aliases=[unique_name.replace('::', '.')])
 
         self.__sort_parameters (symbol, retval, parameters)
 

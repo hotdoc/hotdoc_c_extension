@@ -133,7 +133,7 @@ class GIFormatter(Formatter):
         res = template.render ({'return_value': function.return_value,
             'function_name': title, 'parameters':
             params, 'comment': comment, 'throws': function.throws,
-            'out_params': [], 'is_method': function.is_method})
+            'out_params': [], 'is_method': isinstance(function, MethodSymbol)})
 
         return res
 

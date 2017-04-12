@@ -318,7 +318,6 @@ class GIExtension(Extension):
         elif node.tag == core_ns('virtual-method'):
             klass_node = node.getparent()
             ns = klass_node.getparent()
-            print('./*[@glib:is-gtype-struct-for="%s"]' % klass_node.attrib['name'])
             klass_structure_node = ns.xpath(
                 './*[@glib:is-gtype-struct-for="%s"]' % klass_node.attrib['name'],
                 namespaces=self._GIExtension__nsmap)[0]
@@ -1039,7 +1038,7 @@ class GIExtension(Extension):
         out_parameters = []
 
         for i, param in enumerate (parameters):
-            if symbol.is_method and i == 0:
+            if isinstance(symbol, MethodSymbol) and i == 0:
                 continue
 
             direction = param.get_extension_attribute ('gi-extension', 'direction')
@@ -1334,13 +1333,16 @@ class GIExtension(Extension):
 
         gi_params, retval = self.__create_parameters_and_retval (node)
 
-        func = self.get_or_create_symbol(FunctionSymbol,
+        if node.tag.endswith ('method'):
+            type_ = MethodSymbol
+        else:
+            type_ = FunctionSymbol
+        func = self.get_or_create_symbol(type_,
                                          parameters=gi_params,
                                          return_value=retval,
                                          display_name=name,
                                          unique_name=name,
                                          throws='throws' in node.attrib,
-                                         is_method=node.tag.endswith ('method'),
                                          is_constructor=node.tag==core_ns('constructor'),
                                          filename=self.__get_symbol_filename(name),
                                          parent_name=parent_name)

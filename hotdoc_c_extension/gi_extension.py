@@ -969,12 +969,12 @@ class GIExtension(Extension):
         namespaced = '%s.%s' % (cur_ns, ptype_name)
         if namespaced in self.__class_nodes:
             ptype_name = namespaced
-        return type_tokens, ptype_name
+        return type_tokens, ptype_name, ctype_name
 
     def __create_parameter_symbol (self, gi_parameter):
         param_name = gi_parameter.attrib['name']
 
-        type_tokens, gi_name = self.__type_tokens_and_gi_name_from_gi_node (gi_parameter)
+        type_tokens, gi_name, ctype_name = self.__type_tokens_and_gi_name_from_gi_node (gi_parameter)
 
         res = ParameterSymbol (argname=param_name, type_tokens=type_tokens)
         res.add_extension_attribute ('gi-extension', 'gi_name', gi_name)
@@ -987,7 +987,7 @@ class GIExtension(Extension):
         return res, direction
 
     def __create_return_value_symbol (self, gi_retval, out_parameters):
-        type_tokens, gi_name = self.__type_tokens_and_gi_name_from_gi_node(gi_retval)
+        type_tokens, gi_name, ctype_name = self.__type_tokens_and_gi_name_from_gi_node(gi_retval)
 
         if gi_name == 'none':
             ret_item = None
@@ -1086,7 +1086,7 @@ class GIExtension(Extension):
     def __create_property_symbol (self, node, parent_name):
         unique_name, name, klass_name = self.__get_symbol_names(node)
 
-        type_tokens, gi_name = self.__type_tokens_and_gi_name_from_gi_node(node)
+        type_tokens, gi_name, ctype_name = self.__type_tokens_and_gi_name_from_gi_node(node)
         type_ = QualifiedSymbol (type_tokens=type_tokens)
         type_.add_extension_attribute('gi-extension', 'gi_name', gi_name)
 
@@ -1159,7 +1159,7 @@ class GIExtension(Extension):
     def __create_alias_symbol (self, node, gi_name, parent_name):
         name = self.__get_symbol_names(node)[0]
 
-        type_tokens, gi_name = self.__type_tokens_and_gi_name_from_gi_node(node)
+        type_tokens, gi_name, ctype_name = self.__type_tokens_and_gi_name_from_gi_node(node)
         aliased_type = QualifiedSymbol(type_tokens=type_tokens)
         filename = self.__get_symbol_filename(name)
 
@@ -1213,10 +1213,9 @@ class GIExtension(Extension):
         hierarchy = self.__gir_hierarchies[gi_name]
         children = self.__gir_children_map[gi_name]
 
-        members = self.__get_structure_members(node,
-                                               filename,
-                                               klass_name,
-                                               unique_name)
+        members, raw_text = self.__get_structure_members(node, filename,
+                                                         klass_name,
+                                                         unique_name)
 
         return self.get_or_create_symbol(ClassSymbol,
                                          hierarchy=hierarchy,
@@ -1243,6 +1242,7 @@ class GIExtension(Extension):
         return return_node.find(core_ns('type')).attrib[c_ns('type')]
 
     def __get_structure_members(self, node, filename, struct_name, parent_name):
+        struct_str = "struct %s {" % struct_name
         members = []
         for field in node.findall(core_ns('field')):
             # Weed out vmethods, handled separately
@@ -1250,32 +1250,48 @@ class GIExtension(Extension):
             if not children:
                 continue
             if children[0].tag == core_ns('callback'):
-                continue
+                field_name = field.attrib['name'] + '()'
+                type_ = self.__get_return_type_from_callback(children[0])
 
-            field_name = field.attrib['name']
-            array_type = self.__get_array_type(field)
-            if array_type:
-                type_ = array_type
+                struct_str += "\n    %s %s (" % (type_, field_name[:-2])
+                parameters_nodes = children[0].find(core_ns('parameters'))
+                if parameters_nodes:
+                    for j, gi_parameter in enumerate(parameters_nodes):
+                        param_name = gi_parameter.attrib['name']
+                        type_tokens, gi_name, ctype_name = self.__type_tokens_and_gi_name_from_gi_node(gi_parameter)
+                        struct_str += "%s%s %s" % (', ' if j else '', ctype_name, param_name)
+                struct_str += ");"
             else:
-                type_ = field.find(core_ns('type')).attrib[c_ns('type')]
+                field_name = field.attrib['name']
+                array_type = self.__get_array_type(field)
+                if array_type:
+                    type_ = array_type
+                else:
+                    type_ = field.find(core_ns('type')).attrib[c_ns('type')]
+                struct_str += "\n    %s %s;" % (type_, field_name)
+
+            if field.attrib.get('private', False):
+                struct_str += " /* < private > */"
 
             tokens = self.__type_tokens_from_cdecl (type_)
-
             name = "%s.%s" % (struct_name, field_name)
+            aliases = ["%s::%s" % (struct_name, field_name)]
             qtype = QualifiedSymbol(type_tokens=tokens)
             member = self.get_or_create_symbol(
                 FieldSymbol,
                 member_name=field_name, qtype=qtype,
                 filename=filename, display_name=name,
-                unique_name=name, parent_name=parent_name)
+                unique_name=name, parent_name=parent_name,
+                aliases=aliases)
             members.append(member)
+        struct_str += '\n};'
 
-        return members
+        return members, struct_str
 
     def __create_struct_symbol(self, node, struct_name, filename,
                                parent_name):
 
-        members = self.__get_structure_members(
+        members, raw_text = self.__get_structure_members(
             node, filename, struct_name,
             parent_name=struct_name)
 
@@ -1285,7 +1301,8 @@ class GIExtension(Extension):
                                   anonymous=False,
                                   filename=filename,
                                   members=members,
-                                  parent_name=parent_name)
+                                  parent_name=parent_name,
+                                  raw_text=raw_text)
 
     def __create_interface_symbol (self, node, unique_name, filename):
         return self.get_or_create_symbol(InterfaceSymbol,

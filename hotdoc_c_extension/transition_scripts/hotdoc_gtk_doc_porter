@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 #
 # Copyright © 2016 Mathieu Duponchelle <mathieu.duponchelle@opencreed.com>
@@ -18,10 +18,12 @@
 # along with this library.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
+import re
 import sys
-import urllib
+import codecs
+import urllib.request, urllib.parse, urllib.error
 import argparse
-import urlparse
+import urllib.parse
 import shutil
 import subprocess
 import io
@@ -33,17 +35,47 @@ import yaml
 
 from lxml import etree
 
-from hotdoc.utils.patcher import Patcher
 from hotdoc.utils.utils import OrderedSet, recursive_overwrite
+from hotdoc.run_hotdoc import Application
 from hotdoc.core.symbols import *
-from hotdoc.core.config import ConfigParser
-from hotdoc.core.doc_repo import DocRepo
+from hotdoc.core.config import Config
+from hotdoc.core.project import Project
 from hotdoc.core.exceptions import HotdocException
-from hotdoc.core.doc_database import DocDatabase
+from hotdoc.core.database import Database
 from hotdoc.core.links import Link
-from hotdoc.parsers.gtk_doc_parser import GtkDocStringFormatter
-from hotdoc_gi_extension.gi_extension import GIExtension
+from hotdoc.parsers.gtk_doc import GtkDocStringFormatter
+from hotdoc_c_extension.gi_extension import GIExtension
 from hotdoc.utils.loggable import warn, info, debug, Logger
+
+from hotdoc.utils.utils import all_subclasses, get_installed_extension_classes
+
+
+# pylint: disable=too-few-public-methods
+class Patcher(object):
+    """
+    Banana banana
+    """
+    # pylint: disable=no-self-use
+    def patch(self, filename, begin, end, new_comment):
+        """
+        Banana banana
+        """
+        if "gstobject.h" in filename:
+            return
+
+        print("Patching %s at %s-%s" % (filename, begin, end))
+        file_encoding = subprocess.getoutput('file -b --mime-encoding %s' %
+                                             filename)
+        if "Miscellaneous.default_page" in filename:
+            return
+        with codecs.open(filename, 'r', file_encoding) as _:
+            lines = _.readlines()
+
+        res = lines[0:begin] + [new_comment + '\n'] + lines[end:]
+        res = ''.join(res)
+        with codecs.open(filename, 'w', file_encoding) as _:
+            _.write(res)
+
 
 class SymbolNotFoundException(HotdocException):
     pass
@@ -75,15 +107,15 @@ def which(program):
 
 def require_program(program):
     if which(program) is None:
-        print "Checking for %s: no" % program
-        print "Please install %s" % program
+        print("Checking for %s: no" % program)
+        print("Please install %s" % program)
         sys.exit(1)
-    print "Checking for %s: yes" % program
+    print("Checking for %s: yes" % program)
 
 def require_path(path):
     if not os.path.isfile(path):
-        print "%s is not a valid path" % path
-        print "Please correct it, exiting"
+        print("%s is not a valid path" % path)
+        print("Please correct it, exiting")
         sys.exit(1)
 
 def check_pandoc():
@@ -91,24 +123,24 @@ def check_pandoc():
     oformats = ['commonmark', 'markdown_github', 'markdown']
     pandoc_help = subprocess.check_output(['pandoc', '-h'])
 
-    print "Checking pandoc output formats in preference order"
+    print("Checking pandoc output formats in preference order")
 
     found = False
 
     for oformat in oformats:
-        if oformat in pandoc_help:
+        if oformat in pandoc_help.decode():
             res = 'yes'
-            found = True
         else:
-            res = 'no'
+            found = True
+            res = 'yes'
 
-        print "Checking pandoc's '%s' output format: %s" % (oformat, res)
+        print("Checking pandoc's '%s' output format: %s" % (oformat, res))
 
         if found:
             break
 
     if not found:
-        print "No format found, please install a newer pandoc"
+        print("No format found, please install a newer pandoc")
         sys.exit(1)
 
     return oformat
@@ -135,15 +167,21 @@ require_program('git')
 
 class DocRepoMonitor(object):
     def __init__(self):
+        self.comments = []
         self.section_comments = {}
         self.class_comments = {}
 
-    def build(self, args):
-        DocDatabase.comment_added_signal.connect(self.__comment_added)
-        self.doc_repo = DocRepo()
-        self.doc_repo.setup(args)
-        self.naive_pages = {}
-        for name, page in self.doc_repo.doc_tree.get_pages().items():
+    def build(self, conf_file, args):
+        ext_classes = get_installed_extension_classes(sort=True)
+        self.app = Application(ext_classes)
+        conf = self.conf = Config(conf_file=conf_file)
+        self.app.parse_config(conf)
+        self.rootpath = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], cwd=os.path.dirname(os.path.abspath(conf_file))).decode().strip("\n")
+        self.app.database.comment_added_signal.connect(self.__comment_added)
+        self.doc_repo = Project(self.app)
+        self.doc_repo.parse_config(conf, toplevel=True)
+        self.doc_repo.setup()
+        for name, page in list(self.doc_repo.tree.get_pages().items()):
             bname = os.path.basename(name)
 
             if not bname.startswith('gen-'):
@@ -156,46 +194,280 @@ class DocRepoMonitor(object):
             stripped = os.path.splitext(bname)[0]
             self.naive_pages[stripped] = page
 
-    def sort_section_comments(self, sections):
-        actual_section_comments = {}
-        for name, section in sections.items():
-            section_comment = self.section_comments.get(name)
-            if section_comment is None:
+    def update_comments_lines(self, c, update_number):
+        found = False
+        comments = sorted([tc for tc in self.comments if tc.filename == c.filename],
+                          key=lambda x: (x.filename, x.lineno))
+        for comment in comments:
+            if found:
+                comment.lineno += update_number
+                comment.endlineno += update_number
+            elif c == comment:
+                found = True
+
+    def sort_section_comments(self, sections, gtk_markdown):
+        SECTION_EXCEPTIONS = {
+            " * SECTION:gsturihandler": "GstURIHandlerInterface"
+        }
+
+        tick = '`'
+        if gtk_markdown:
+            open_code = "|["
+            end_code = "]|\n * "
+            lang_c = '<!-- language="C" -->'
+            gt = "&gt;"
+            lt = "&lt;"
+            quote = '&quot;'
+        else:
+            end_code = "```\n *"
+            open_code = "\n * ```"
+            lang_c = ' c'
+            gt = ">"
+            lt = "<"
+            quote = '"'
+
+        self.comments.sort(key=lambda x: (x.filename, x.lineno))
+        for c in self.comments:
+            if "gstobject.h" in c.filename:
                 continue
-
-            sym = self.doc_repo.doc_database.get_symbol(section.title or name)
-            if sym and type(sym) is StructSymbol:
-                class_name = u'%s::%s' % (sym.unique_name, sym.unique_name)
-                class_sym = self.doc_repo.doc_database.get_symbol(class_name)
-                if class_sym:
-                    new_name = class_name + ':'
-                    section_comment.raw_comment = \
-                        section_comment.raw_comment.replace(section_comment.name,
-                            new_name)
-                    self.class_comments[new_name] = section_comment
-                    section.comment = None
+            if "gstrawbaseparse" in c.filename:
+                continue
+            lines = c.raw_comment.split("\n")
+            is_section = len(lines) >= 2 and lines[1].startswith(' * SECTION:')
+            if is_section:
+                element = 'element-' in lines[1]
+                if not element:
+                    n_section = SECTION_EXCEPTIONS.get(lines[1])
+                    if not n_section:
+                        n_section = os.path.basename(c.filename).replace('.c', ".h")
                 else:
-                    actual_section_comments[name] = section_comment
-                    section_comment.raw_comment = ''
-            else:
-                actual_section_comments[name] = section_comment
-                section_comment.raw_comment = ''
+                        if not gtk_markdown:
+                            n_section = lines[1].split("element-")[1]
+                        else:
+                            n_section = lines[1]
 
-        self.section_comments = actual_section_comments
+                        title = lines[1].split("element-")[1]
+
+                if not gtk_markdown:
+                    lines[1] = " * SECTION:%s" % n_section
+
+                if not element:
+                    name = n_section
+                    fname = c.filename.replace('.c', '.h')
+                    pagenames = [fname.replace(self.rootpath, '')[1:], os.path.basename(fname)]
+                    title = None
+                    page = None
+
+                    for pagename in pagenames:
+                        try:
+                            page = self.doc_repo.tree.get_pages()[pagename]
+                            title = page.get_title().strip('_')
+                            if title == 'unnamed':
+                                for s in page.symbols:
+                                    if isinstance(s, QualifiedSymbol):
+                                        if s.display_name:
+                                            title = s.display_name
+                                            break
+                                if title == 'unnamed':
+                                    if c.title:
+                                        title = c.title.description
+                                    else:
+                                        title = None
+                        except KeyError:
+                            print("ERROR getting page %s" % pagename)
+                    if not page:
+                        print("ERROR getting page %s" % pagename)
+                        # import ipdb; ipdb.set_trace()
+
+                    print("Title is ready? %s" % title)
+                    if title is None:
+                        try:
+                            name = os.path.splitext(name)[0]
+                            if name.startswith('gst'):
+                                title = name[0].upper() + name[1:3] + name[3].upper() + name[4:]
+                            else:
+                                title = name[0].upper() + name[1:]
+                        except:
+                            import ipdb; ipdb.set_trace()
+
+                if title.endswith('Class'):
+                    title = title[:-5]
+                elif title.endswith('Private'):
+                    title = title[:-len('Private')]
+
+                title_str = " * @title: " + title
+                print("==== > Title: %s" % title_str)
+                if not c.title:
+                    lines.insert(2, title_str)
+                    self.update_comments_lines(c, 1)
+                    print("Inserting %s" % lines[2])
+                elif not [l for l in lines if '@title' in l and not l.endswith('.h')]:
+                    print("Setting %s" % title_str)
+                    lines[2] = title_str
+
+            res = []
+            in_list = False
+            in_note = False
+            in_variable_list = False
+            for i, l in enumerate(lines):
+                if "<itemizedlist>" in l:
+                   in_list = True
+                elif "</itemizedlist>" in l:
+                   in_list = False
+                if "<variablelist>" in l:
+                    in_variable_list = True
+                elif "</variablelist>" in l:
+                    in_variable_list = False
+
+                if "<note>" in l:
+                    print("In note!")
+                    in_note = True
+
+                to_prev = False
+                if in_variable_list and "<listitem>" in l:
+                    to_prev = True
+
+                l = l.replace(
+                        "", ""
+                    ).replace(
+                        "|[", open_code
+                    ).replace(
+                        "]|", end_code
+                    ).replace(
+                        '<!-- language="C" -->', lang_c
+                    ).replace(
+                        "<title>", "## "
+                    ).replace(
+                        "</title>", ""
+                    ).replace(
+                        "<informalexample>", ""
+                    ).replace(
+                        "</informalexample>", ""
+                    ).replace(
+                        "<programlisting>", open_code
+                    ).replace(
+                        "</programlisting>", end_code
+                    ).replace(
+                        "<programlisting language=\"c\">", open_code + lang_c
+                    ).replace(
+                        "<itemizedlist>", ""
+                    ).replace(
+                        "</itemizedlist>", ""
+                    ).replace(
+                        "<para>", ''
+                    ).replace(
+                        "</para>", ''
+                    ).replace(
+                        "<listitem>", '* ' if not in_variable_list else ':'
+                    ).replace(
+                        "</listitem>", ''
+                    ).replace(
+                        "</refsect2>", ''
+                    ).replace(
+                        "<refsect2>", ''
+                    ).replace(
+                        "<term>", '* ' + tick
+                    ).replace(
+                        "</term>", tick
+                    ).replace(
+                        "</variablelist>", ''
+                    ).replace(
+                        "<variablelist>", ''
+                    ).replace(
+                        "<varlistentry>", ''
+                    ).replace(
+                        "</varlistentry>", ''
+                    ).replace(
+                        "</filename>", tick
+                    ).replace(
+                        "&lt;", lt
+                    ).replace(
+                        "&gt;", gt
+                    ).replace(
+                        "&quot;", quote
+                    ).replace(
+                        "<classname>", tick
+                    ).replace(
+                        "</classname>", tick
+                    ).replace(
+                        "</literal>", tick
+                    ).replace(
+                        "<literal>", tick
+                    )
+
+                found = False
+                if "</note>" in l:
+                    print("NOT IN  note!")
+                    in_note = False
+                for regex in [" \* *</?example>$", " \* *</?listitem>$",
+                              " \* *</?note>$"]:
+                    if re.findall(regex, l):
+                        found = True
+
+                if l.startswith("<table"):
+                    print("===> TABLE TO FIX!")
+
+                if found:
+                    self.update_comments_lines(c, -1)
+                    continue
+
+                l = l.replace(
+                        "<note>", ''
+                    ).replace(
+                        "</note>", ''
+                    )
+
+                if res  and re.findall("^ \* * \*$", res[-1]):
+                    to_prev = True
+
+                lines = []
+                for l in l.split("\n"):
+                    l = l.rstrip()
+                    if in_variable_list:
+                        l = re.sub("^ \* *", " * ", l)
+                    if in_note:
+                        l = l.replace(" * ", " * > ")
+
+                    lines.append(l)
+
+                if len(lines) > 1:
+                    self.update_comments_lines(c, len(lines) - 1)
+
+                if to_prev:
+                    res[-1] += '\n'.join([" " + l.replace("*", "").strip() for l in lines])
+                    self.update_comments_lines(c, -1)
+                else:
+                    res.extend(lines)
+
+
+            raw_lines = []
+            nempty = 0
+            for l in res:
+                l = l.rstrip()
+                if l == " *":
+                    nempty += 1
+                else:
+                    nempty = 0
+                if nempty > 1:
+                    self.update_comments_lines(c, -1)
+                else:
+                    raw_lines.append(l)
+
+            c.raw_comment = '\n'.join(raw_lines)
+            if "gstelementfactory.c" in c.filename:
+                print(c.raw_comment)
 
     def __comment_added(self, doc_db, comment):
-        if comment.name.startswith('SECTION'):
-            name = comment.name[len('SECTION'):].lstrip(': ').strip()
-            self.section_comments[name] = comment
+        self.comments.append(comment)
 
 def db_to_md (content):
     with open ("tmpfile", 'w') as f:
-        f.write (content)
+        f.write (content.decode())
     cmd = ['pandoc', '-s', '-f', 'docbook', '-t', MD_FORMAT]
     cmd.append ("tmpfile")
     converted = subprocess.check_output (cmd)
     os.unlink ('tmpfile')
-    return converted
+    return converted.decode()
 
 class DTDResolver(etree.Resolver):
     def __init__(self, paths):
@@ -207,7 +479,7 @@ class DTDResolver(etree.Resolver):
                     self.urls[f] = url
 
     def resolve(self, url, id, context):
-        comps = urlparse.urlparse(url)
+        comps = urllib.parse.urlparse(url)
         if not comps.scheme:
             bname = os.path.basename(url)
             my_url = self.urls.get(bname)
@@ -264,7 +536,7 @@ def dump_gi_index(page, standalones, md_paths):
                 title = "Section %d" % sectnum
             db_content = etree.tostring(standalone)
             href = title
-            md_path = urllib.unquote(get_free_md_path(md_paths, href))
+            md_path = urllib.parse.unquote(get_free_md_path(md_paths, href))
             sub_md_content = db_to_md (db_content)
             with open(md_path, 'w') as f:
                 f.write(sub_md_content)
@@ -275,7 +547,7 @@ def dump_gi_index(page, standalones, md_paths):
 
 NSMAP = {'xml': 'http://www.w3.org/XML/1998/namespace'}
 
-def collect_xrefs(doc_repo, filename, root):
+def collect_xrefs(app, filename, root):
     id_nodes = root.xpath('.//*[@id]')
     id_nodes.extend(root.xpath('.//*[@xml:id]', namespaces=NSMAP))
     if 'id' in root.attrib or '{%s}id' % NSMAP['xml'] in root.attrib:
@@ -301,15 +573,15 @@ def collect_xrefs(doc_repo, filename, root):
         if node != root:
             ref += '#' + title.lower().replace(' ', '-')
         link = Link(ref, title, id_)
-        doc_repo.link_resolver.add_link(link)
+        app.link_resolver.add_link(link)
 
-def translate_docbook(filename, resolver, md_paths, new_name, doc_repo, files_to_render, parent_page):
+def translate_docbook(filename, resolver, md_paths, new_name, app, files_to_render, parent_page):
     with open(filename, 'r') as _:
         xincluded = _.read()
 
     subpages = {}
 
-    dir_ = os.path.dirname(filename)
+    dir_ = os.path.dirname(os.path.abspath(filename))
 
     parser = etree.XMLParser(load_dtd=True, recover=True)
     parser.resolvers.add(resolver)
@@ -322,10 +594,10 @@ def translate_docbook(filename, resolver, md_paths, new_name, doc_repo, files_to
     NSMAP.pop(None, None)
 
     for error in parser.error_log:
-        print error
+        print(error)
 
     if parser.error_log:
-        print "Continuing despite the error"
+        print("Continuing despite the error")
 
     includes = root.findall('.//{%s}include' % NSMAP['xi'])
 
@@ -383,7 +655,7 @@ def translate_docbook(filename, resolver, md_paths, new_name, doc_repo, files_to
         md_content += '...\n\n'
 
 
-    collect_xrefs(doc_repo, filename, root)
+    collect_xrefs(app, filename, root)
 
 
     files_to_render[md_paths[new_name]] = (root, md_content)
@@ -396,9 +668,9 @@ def translate_docbook(filename, resolver, md_paths, new_name, doc_repo, files_to
         parent_page['subpages'].append(cpage)
         dump_gi_index(cpage, list(standalones), md_paths)
 
-    for new_name, filename in subpages.items():
+    for new_name, filename in list(subpages.items()):
         cpage = {}
-        translate_docbook(filename, resolver, md_paths, new_name, doc_repo, files_to_render, cpage)
+        translate_docbook(filename, resolver, md_paths, new_name, app, files_to_render, cpage)
         parent_page['subpages'].append(cpage)
 
 class Section(object):
@@ -409,7 +681,7 @@ class Section(object):
         self.title = None
         self.symbols = set()
         if node is not None:
-            self.ofile = unicode(node.find('FILE').text)
+            self.ofile = str(node.find('FILE').text)
             tnode = node.find('TITLE')
             if tnode is not None:
                 self.title = tnode.text
@@ -443,7 +715,7 @@ def write_symbols(monitor, section):
     not_found = 0
     found = 0
     opath = os.path.join(MD_OUTPUT_PATH, section.ofile + '.markdown')
-    contents = u''
+    contents = ''
 
     with io.open(opath, 'w', encoding='utf-8') as f:
         metadict = {}
@@ -460,9 +732,9 @@ def write_symbols(monitor, section):
                 desc = section.comment.description.split('\n')
                 for i, line in enumerate(desc):
                     desc[i] = line.strip()
-                contents = u'%s\n' % translate('\n'.join(desc))
+                contents = '%s\n' % translate('\n'.join(desc))
         for symbol in section.symbols:
-            sym = monitor.doc_repo.doc_database.get_symbol(symbol)
+            sym = monitor.app.database.get_symbol(symbol)
             if sym is None:
                 debug("Warning, the symbol %s referenced in the "
                 "section file under the %s output file could not "
@@ -471,18 +743,18 @@ def write_symbols(monitor, section):
             else:
                 metadict['symbols'].append(symbol)
                 found += 1
-        f.write(u'---\n')
-        f.write(unicode(yaml.dump(metadict, default_flow_style=False)))
-        f.write(u'...\n\n')
+        f.write('---\n')
+        f.write(str(yaml.dump(metadict, default_flow_style=False)))
+        f.write('...\n\n')
         f.write(contents)
-    
+
     return not_found
 
 def translate_sections(monitor, sections):
     not_found = 0
     n_symbols = 0
     gi_subpages = []
-    for sname, section in sections.items():
+    for sname, section in list(sections.items()):
         not_found += write_symbols(monitor, section)
         n_symbols += len(section.symbols)
         gi_subpages.append(section.ofile + '.markdown')
@@ -499,10 +771,13 @@ def translate_sections(monitor, sections):
     return gi_subpages
 
 def patch_comments(patcher, comments):
+    print("Comments: %s" % comments)
     if not comments:
         return
 
     for comment in comments:
+        if comment.lineno < 0:
+            continue
         patcher.patch(comment.filename, comment.lineno - 1,
                 comment.endlineno, comment.raw_comment)
         if comment.raw_comment == '':
@@ -515,9 +790,10 @@ def patch_comments(patcher, comments):
 
 def sections_from_naive_pages(monitor):
     sections = {}
-    for nname, npage in monitor.doc_repo.doc_tree.get_pages().items():
+    for nname, npage in list(monitor.doc_repo.tree.get_pages().items()):
+        print("Items: %s %s" % (nname, npage))
         if not \
-            npage.source_file.startswith(monitor.doc_repo.get_generated_doc_folder()):
+            npage.source_file.startswith(monitor.app.output):
             continue
         section = Section(None)
         relpath = os.path.relpath(nname,
@@ -535,6 +811,7 @@ def sections_from_naive_pages(monitor):
             section.title = stripped
         sections[stripped] = section
 
+    print("Returning %s" % sections)
     return sections
 
 def dump_sitemap(page, gi_subpages, level=0):
@@ -549,8 +826,8 @@ def dump_sitemap(page, gi_subpages, level=0):
     for cpage in page['subpages']:
         dump_sitemap(cpage, gi_subpages, level + 1)
 
-def render_files(files_to_render, doc_repo):
-    for md_path, tup in files_to_render.items():
+def render_files(files_to_render, app):
+    for md_path, tup in list(files_to_render.items()):
         root, md_content = tup
         links = root.findall('.//link')
         links.extend(root.findall('.//xref'))
@@ -565,16 +842,16 @@ def render_files(files_to_render, doc_repo):
             sym_name = linkend.replace('-', '_')
             if sym_name.endswith(':CAPS'):
                 sym_name = sym_name[:-5]
-            link = doc_repo.link_resolver.get_named_link(sym_name)
+            link = app.link_resolver.get_named_link(sym_name)
             if link is None:
-                link = doc_repo.link_resolver.get_named_link(linkend)
+                link = app.link_resolver.get_named_link(linkend)
 
-            symbol = doc_repo.doc_database.get_symbol(sym_name)
+            symbol = app.database.get_symbol(sym_name)
             if link:
                 if symbol:
                     link_node.attrib['url'] = link.id_
                 else:
-                    link_node.attrib['url'] = link.get_link()
+                    link_node.attrib['url'] = link.get_link(app.link_resolver)
 
                 if link_node.tag == 'xref':
                     link_node.text = link.get_title()
@@ -592,10 +869,9 @@ if __name__=='__main__':
     parser.add_argument('--section-file', action='store',
         dest='section_file', help='The path to the gtk-doc "sections file"')
     parser.add_argument('--docbook-index', action='store',
-        required=True, dest='docbook_index',
+        required=False, dest='docbook_index',
         help='The path to the docbook index')
-    parser.add_argument('--conf-file', action='store',
-        required=True, dest='conf_file',
+    parser.add_argument('conf_files', nargs='+',
         help='The path to a hotdoc.json file configured for'
              'parsing the C sources of the project')
     parser.add_argument('--extra-dtd-path', action='append',
@@ -611,72 +887,85 @@ if __name__=='__main__':
 
     os.mkdir(MD_OUTPUT_PATH)
 
-    require_path(args.conf_file)
-    require_path(args.docbook_index)
+    for conf_file in args.conf_files:
+        require_path(conf_file)
+    if args.docbook_index:
+        require_path(args.docbook_index)
 
-    hdargs = ['run', '--conf-file', args.conf_file, '--gi-smart-index']
-    monitor = DocRepoMonitor()
-    monitor.build(hdargs)
+    # hdargs = ['run', '--conf-file', args.conf_file, '--gi-smart-index']
+    for conf_file in args.conf_files:
+        tmpfile = os.path.join(os.path.dirname(os.path.abspath(conf_file)), "tmp.json")
+        try:
+            shutil.copyfile(conf_file, tmpfile)
+        except shutil.SameFileError:
+            continue
+        conf_file = tmpfile
+        monitor = DocRepoMonitor()
+        monitor.build(conf_file, args)
 
-    gi_subpages = []
+        gi_subpages = []
 
-    if args.section_file is not None:
-        require_path(args.section_file)
-        sections = parse_section_file(args.section_file,
-            monitor.section_comments)
-        monitor.sort_section_comments(sections)
-        gi_subpages = translate_sections(monitor, sections)
-    else:
-        sections = sections_from_naive_pages(monitor)
-        monitor.sort_section_comments(sections)
-        for sname, section in sections.items():
-            section_comment = monitor.section_comments.get(sname)
-            if section_comment:
-                full_path = os.path.join(MD_OUTPUT_PATH, section.ofile)
-                dname = os.path.dirname(full_path)
-                if not os.path.exists(dname):
-                    os.makedirs(dname)
-                    with io.open(full_path, 'w', encoding='utf-8') as f:
-                        if section_comment.title:
-                            f.write(u"### %s\n\n" % cgi.escape(section_comment.title))
-                        elif section.title:
-                            f.write(u"### %s\n\n" % cgi.escape(section.title))
-                        if section_comment.short_description:
-                            f.write(u'%s\n\n' %
-                                translate(section_comment.short_description))
-                        if section_comment.description:
-                            f.write(u'%s\n\n' % translate(section_comment.description))
+        if args.section_file is not None:
+            require_path(args.section_file)
+            sections = parse_section_file(args.section_file,
+                monitor.section_comments)
+            monitor.sort_section_comments(sections, True)
+            gi_subpages = translate_sections(monitor, sections)
+        else:
+            sections = sections_from_naive_pages(monitor)
+            monitor.sort_section_comments(sections, True)
+            for sname, section in list(sections.items()):
+                section_comment = monitor.section_comments.get(sname)
+                if section_comment:
+                    full_path = os.path.join(MD_OUTPUT_PATH, section.ofile)
+                    dname = os.path.dirname(full_path)
+                    if not os.path.exists(dname):
+                        os.makedirs(dname)
+                        with io.open(full_path, 'w', encoding='utf-8') as f:
+                            if section_comment.title:
+                                f.write("### %s\n\n" % cgi.escape(section_comment.title))
+                            elif section.title:
+                                f.write("### %s\n\n" % cgi.escape(section.title))
+                            if section_comment.short_description:
+                                f.write('%s\n\n' %
+                                    translate(section_comment.short_description))
+                            if section_comment.description:
+                                f.write('%s\n\n' % translate(section_comment.description))
 
-    resolver = DTDResolver(args.extra_dtd_paths)
-    md_paths = {'gi-index': os.path.join(MD_OUTPUT_PATH, 'gi-index.markdown')}
-    md_paths['index'] = os.path.join(MD_OUTPUT_PATH, 'index.markdown')
+        resolver = DTDResolver(args.extra_dtd_paths)
+        md_paths = {'gi-index': os.path.join(MD_OUTPUT_PATH, 'gi-index.markdown')}
+        md_paths['index'] = os.path.join(MD_OUTPUT_PATH, 'index.markdown')
 
-    files_to_render = {}
-    sitemap_root = {}
-    translate_docbook(args.docbook_index, resolver, md_paths, 'index',
-        monitor.doc_repo, files_to_render, sitemap_root)
+        files_to_render = {}
+        sitemap_root = {}
+        if args.docbook_index:
+            translate_docbook(args.docbook_index, resolver, md_paths, 'index',
+                monitor.app, files_to_render, sitemap_root)
 
-    os.unlink('sitemap.txt')
-    dump_sitemap(sitemap_root, gi_subpages)
+        try:
+            os.unlink('sitemap.txt')
+        except FileNotFoundError:
+            pass
+        dump_sitemap(sitemap_root, gi_subpages)
 
-    render_files(files_to_render, monitor.doc_repo)
+        render_files(files_to_render, monitor.app)
 
-    patcher = Patcher()
-    patch_comments(patcher, monitor.class_comments.values() +
-        monitor.section_comments.values())
+        patcher = Patcher()
+        patch_comments(patcher, list(monitor.comments) +
+            list(monitor.section_comments.values()))
 
-    extra_conf = {
-        'gi_index': 'gi-index.markdown',
-        'languages': ['c', 'python', 'javascript'],
-        'output': 'built_doc',
-        'gtk_doc_escape_html': True,
-        'page_parser_escape_html': True,
-        }
+        extra_conf = {
+            'gi_index': 'gi-index.markdown',
+            'languages': ['c', 'python', 'javascript'],
+            'output': 'built_doc',
+            'gtk_doc_escape_html': True,
+            'page_parser_escape_html': True,
+            }
 
-    ncp = ConfigParser(conf_file=args.conf_file,
-        command_line_args=extra_conf)
+        ncp = Config(conf_file=conf_file,
+            command_line_args=extra_conf)
 
-    ncp.dump(args.conf_file)
+        ncp.dump(conf_file)
 
-    recursive_overwrite(MD_OUTPUT_PATH, monitor.doc_repo.get_base_doc_folder())
-    shutil.rmtree(MD_OUTPUT_PATH)
+        # recursive_overwrite(MD_OUTPUT_PATH, monitor.doc_repo.get_base_doc_folder())
+        # shutil.rmtree(MD_OUTPUT_PATH)

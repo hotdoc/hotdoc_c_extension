@@ -859,6 +859,10 @@ def render_files(files_to_render, app):
                 link_node.tag = 'ulink'
                 continue
 
+        # Removing refmetas as pandoc just output its text wihout making
+        # any sense of it.
+        for refmeta in root.findall('refmeta'):
+            root.remove(refmeta)
         md_content += db_to_md (etree.tostring(root))
         with open (md_path, 'w') as f:
             f.write (md_content)

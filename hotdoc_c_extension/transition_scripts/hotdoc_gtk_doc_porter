@@ -679,7 +679,7 @@ class Section(object):
         self.comment = None
         self.ofile = None
         self.title = None
-        self.symbols = set()
+        self.symbols = OrderedSet()
         if node is not None:
             self.ofile = str(node.find('FILE').text)
             tnode = node.find('TITLE')
@@ -688,7 +688,7 @@ class Section(object):
             else:
                 self.title = None
             symbols = node.getchildren()[-1].tail.split("\n")
-            self.symbols = set([s for s in symbols if s])
+            self.symbols = OrderedSet([s for s in symbols if s])
 
 
 def parse_section_file(sections_path, section_comments):

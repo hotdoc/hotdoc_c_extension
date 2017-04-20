@@ -881,6 +881,8 @@ if __name__=='__main__':
     parser.add_argument('--extra-dtd-path', action='append',
         help='Path to an extra DTD if needed, can be specified multiple times',
         dest='extra_dtd_paths')
+    parser.add_argument('-n', '--no-patching-comment', action='store_true',
+        help='Do not patch comment in source code')
 
     args = parser.parse_args()
     # Ensure we build from scratch
@@ -913,11 +915,13 @@ if __name__=='__main__':
             require_path(args.section_file)
             sections = parse_section_file(args.section_file,
                 monitor.section_comments)
-            monitor.sort_section_comments(sections, True)
+            if not args.no_patching_comment:
+                monitor.sort_section_comments(sections, True)
             gi_subpages = translate_sections(monitor, sections)
         else:
             sections = sections_from_naive_pages(monitor)
-            monitor.sort_section_comments(sections, True)
+            if not args.no_patching_comment:
+                monitor.sort_section_comments(sections, True)
             for sname, section in list(sections.items()):
                 section_comment = monitor.section_comments.get(sname)
                 if section_comment:
@@ -954,9 +958,10 @@ if __name__=='__main__':
 
         render_files(files_to_render, monitor.app)
 
-        patcher = Patcher()
-        patch_comments(patcher, list(monitor.comments) +
-            list(monitor.section_comments.values()))
+        if not args.no_patching_comment:
+            patcher = Patcher()
+            patch_comments(patcher, list(monitor.comments) +
+                list(monitor.section_comments.values()))
 
         extra_conf = {
             'gi_index': 'gi-index.markdown',

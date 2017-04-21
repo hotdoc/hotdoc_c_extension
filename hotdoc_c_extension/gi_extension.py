@@ -1335,6 +1335,8 @@ class GIExtension(Extension):
 
         if node.tag.endswith ('method'):
             type_ = MethodSymbol
+        elif node.tag==core_ns('constructor'):
+            type_ = ConstructorSymbol
         else:
             type_ = FunctionSymbol
         func = self.get_or_create_symbol(type_,
@@ -1343,7 +1345,6 @@ class GIExtension(Extension):
                                          display_name=name,
                                          unique_name=name,
                                          throws='throws' in node.attrib,
-                                         is_constructor=node.tag==core_ns('constructor'),
                                          filename=self.__get_symbol_filename(name),
                                          parent_name=parent_name)
 

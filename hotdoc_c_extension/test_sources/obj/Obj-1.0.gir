@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<!-- This file was automatically generated from C sources - DO NOT EDIT!
+To affect the contents of this file, edit the original C definitions,
+and/or use gtk-doc annotations.  -->
+<repository version="1.2"
+            xmlns="http://www.gtk.org/introspection/core/1.0"
+            xmlns:c="http://www.gtk.org/introspection/c/1.0"
+            xmlns:glib="http://www.gtk.org/introspection/glib/1.0">
+  <namespace name="Obj"
+             version="1.0"
+             shared-library="libgobject-2.0.so.0,libglib-2.0.so.0,libobjectlib.so"
+             c:identifier-prefixes="Obj"
+             c:symbol-prefixes="obj">
+    <class name="Obj"
+           c:symbol-prefix="obj"
+           c:type="ObjObj"
+           glib:type-name="ObjObj"
+           glib:get-type="obj_obj_get_type"
+           glib:type-struct="ObjClass">
+      <field name="parent_instance" introspectable="0">
+        <type c:type="GObject"/>
+      </field>
+    </class>
+    <record name="ObjClass"
+            c:type="ObjObjClass"
+            glib:is-gtype-struct-for="Obj">
+      <field name="parent" introspectable="0">
+        <type c:type="GObjectClass"/>
+      </field>
+      <field name="_padding">
+        <array zero-terminated="0" c:type="gpointer" fixed-size="10">
+          <type name="gpointer" c:type="gpointer"/>
+        </array>
+      </field>
+    </record>
+  </namespace>
+</repository>

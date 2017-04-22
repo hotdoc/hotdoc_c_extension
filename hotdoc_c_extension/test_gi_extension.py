@@ -2,6 +2,7 @@ import os
 import copy
 
 from collections import OrderedDict
+from lxml import etree
 
 from hotdoc.tests.fixtures import HotdocTest
 from hotdoc.core.config import Config
@@ -233,21 +234,24 @@ class TestGiExtension(HotdocTest):
 
         return app
 
-    def get_gir(self):
-        return os.path.join(HERE, 'tests_assets', 'Test-1.0.gir')
+    def get_gir(self, project_path='test'):
+        girname = project_path.capitalize() + '-1.0.gir'
 
-    def get_sources(self):
-        return [os.path.join(HERE, 'tests_assets', '*.[ch]'),
-                os.path.join(HERE, 'tests_assets', '*/*.[ch]')]
+        return os.path.join(HERE, 'test_sources', project_path, girname)
 
-    def get_config(self, sitemap_content='gi-index'):
-        return Config(conf_file=self.get_config_file(sitemap_content))
+    def get_sources(self, project_path='test'):
+        return [os.path.join(HERE, 'test_sources/', project_path, '*.[ch]'),
+                os.path.join(HERE, 'test_sources/', project_path, '*/*.[ch]')]
 
-    def get_config_file(self, sitemap_content='gi-index'):
+    def get_config(self, sitemap_content='gi-index', project_path=''):
+        return Config(conf_file=self.get_config_file(sitemap_content,
+                                                     project_path=project_path))
+
+    def get_config_file(self, sitemap_content='gi-index', project_path='test'):
         return self._create_project_config_file(
-            "test", sitemap_content=sitemap_content,
-            extra_conf={'gi_sources': [self.get_gir()],
-                        'gi_c_sources': self.get_sources(),
+            project_path, sitemap_content=sitemap_content,
+            extra_conf={'gi_sources': [self.get_gir(project_path=project_path)],
+                        'gi_c_sources': self.get_sources(project_path=project_path),
                         'gi_smart_index': True})
 
     def build_tree(self, pages, page, node):
@@ -270,9 +274,9 @@ class TestGiExtension(HotdocTest):
         node[page.source_file] = pnode
 
 
-    def create_project_and_run(self):
+    def create_project_and_run(self, project_path='test'):
         app = self.create_application()
-        config = self.get_config()
+        config = self.get_config(project_path=project_path)
 
         app.parse_config(config)
         app.run()
@@ -309,7 +313,7 @@ class TestGiExtension(HotdocTest):
         app.database.add_comment(
             Comment(name="TestUndocumentedFlag",
                     filename=os.path.join(
-                        HERE, 'tests_assets', "test-greeter.h"),
+                        HERE, 'test_sources/test/', "test-greeter.h"),
                     description="Greeter than great"))
         app.run()
 
@@ -327,7 +331,7 @@ class TestGiExtension(HotdocTest):
         self.assertEqual(symbol_names[1], 'TestDerivable')
         self.assertEqual(page.comment.title.description, 'Derivable and more')
 
-    def test_addding_symbol_doc(self):
+    def test_adding_symbol_doc(self):
         app = self.create_application()
         config = self.get_config()
 
@@ -335,7 +339,7 @@ class TestGiExtension(HotdocTest):
         app.database.add_comment(
             Comment(name="TestUndocumentedFlag",
                     filename=os.path.join(
-                        HERE, 'tests_assets', "test-greeter.h"),
+                        HERE, 'test_sources/test/', "test-greeter.h"),
                     description="Greeter than great"))
         app.run()
 
@@ -442,3 +446,45 @@ class TestGiExtension(HotdocTest):
         res = app.link_resolver.resolving_link_signal(symbol.link)
         self.assertEqual(res, ['javascript/test-greeter-h.html#TEST_GREETER_VERSION'])
 
+    def test_link_for_lang_in_another_project(self):
+        app = self.create_application()
+        self.get_config_file(project_path='obj')
+
+        index_content = "# test_link_for_lang_in_another_project"
+        index_path = self._create_md_file('index.md', index_content)
+
+        self.get_config_file(project_path='func')
+
+        content = 'project.markdown\n\tfunc.json\n\tobj.json'
+        config = self._create_project_config('project', sitemap_content=content)
+        self.get_config_file()
+        app.parse_config(config)
+
+        app.database.add_comment(
+            Comment(name="func_f1",
+                    filename=os.path.join(
+                        HERE, 'test_sources/func/', "function.h"),
+                    description="Linking to #ObjObj"))
+
+        app.database.add_comment(
+            Comment(name="ObjObj",
+                    filename=os.path.join(
+                        HERE, 'test_sources/obj/', "obj.h"),
+                    description="Linking to #func_f1"))
+
+        app.run()
+
+        # Make sure that the link from the func project to the second
+        # properly take into account the current language
+        with open(os.path.join(app.output, "html", "func-0.2/python/function.html"),
+                  'r') as _:
+            funchtml = etree.HTML(_.read())
+        link = [a for a in funchtml.findall('.//a') if a.text == "Obj.Obj"][0]
+        self.assertEqual(link.attrib['href'], 'obj-0.2/python/obj.html#ObjObj')
+
+        with open(os.path.join(app.output, "html", "obj-0.2/python/obj.html"),
+                  'r') as _:
+            funchtml = etree.HTML(_.read())
+
+        link = [a for a in funchtml.findall('.//a') if a.text == 'Func.f1'][0]
+        self.assertEqual(link.attrib['href'], "func-0.2/python/function.html#func_f1")

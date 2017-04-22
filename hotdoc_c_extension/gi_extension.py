@@ -147,6 +147,7 @@ class GIExtension(Extension):
 
     __gathered_gtk_doc_links = False
     __gtkdoc_hrefs = {}
+    __node_cache = {}
 
     def __init__(self, app, project):
         Extension.__init__(self, app, project)
@@ -159,7 +160,6 @@ class GIExtension(Extension):
                       'glib': 'http://www.gtk.org/introspection/glib/1.0'}
 
         self.__parsed_girs = set()
-        self.__node_cache = {}
 
         # If generating the index ourselves, we will filter these functions
         # out.
@@ -262,7 +262,7 @@ class GIExtension(Extension):
         self.__scan_comments()
         self.info('Gathering legacy gtk-doc links')
         self.__scan_sources()
-        self.app.link_resolver.resolving_link_signal.connect(self.__translate_link_ref)
+        self.app.link_resolver.resolving_link_signal.connect_after(self.__translate_link_ref)
 
     def __scan_comments(self):
         comment_parser = GtkDocParser(self.project)
@@ -276,6 +276,11 @@ class GIExtension(Extension):
     def format_page(self, page, link_resolver, output):
         link_resolver.get_link_signal.connect(self.search_online_links)
         self.formatter.formatting_symbol_signal.connect(self.__formatting_symbol)
+
+        # Make sure extension formatting is the first translating links
+        self.app.link_resolver.resolving_link_signal.disconnect(self.__translate_link_ref)
+        self.app.link_resolver.resolving_link_signal.connect(self.__translate_link_ref)
+
         page.meta['extra']['gi-languages'] = ','.join(self.languages)
         for l in self.languages:
             page.meta['extra']['gi-language'] = l
@@ -286,6 +291,9 @@ class GIExtension(Extension):
 
         link_resolver.get_link_signal.disconnect(self.search_online_links)
         self.formatter.formatting_symbol_signal.disconnect(self.__formatting_symbol)
+
+        self.app.link_resolver.resolving_link_signal.disconnect(self.__translate_link_ref)
+        self.app.link_resolver.resolving_link_signal.connect_after(self.__translate_link_ref)
 
     @staticmethod
     def get_dependencies ():
@@ -747,19 +755,20 @@ class GIExtension(Extension):
 
         return True
 
-    def insert_language(self, ref, language):
-        if not ref.startswith(self.project.sanitized_name + '/'):
+    def insert_language(self, ref, language, project):
+        if not ref.startswith(project.sanitized_name + '/'):
             return language + '/' + ref
 
         p = pathlib.Path(ref)
         return str(pathlib.Path(p.parts[0], language, *p.parts[1:]))
 
     def __translate_link_ref(self, link):
-        page = self.project.tree.get_page_for_symbol(link.id_)
+        project, page = self.__get_page_for_symbol(link.id_)
 
         if self.language is None:
             if page and page.extension_name == 'gi-extension':
-                return self.insert_language(link.ref, self.languages[0])
+                return self.insert_language(link.ref, self.languages[0],
+                                            project)
             return None
 
         fund = self._fundamentals.get(link.id_)
@@ -768,13 +777,33 @@ class GIExtension(Extension):
 
         if page and page.extension_name == 'gi-extension':
             if link.ref and self.language != 'c' and not self.__is_introspectable(link.id_):
-                return self.insert_language(link.ref, 'c')
-            return self.insert_language(link.ref, self.language)
+                return self.insert_language(link.ref, 'c',
+                                            project)
+            return self.insert_language(link.ref, self.language,
+                                        project)
 
         if link.ref == None:
             return self.__gtkdoc_hrefs.get(link.id_)
 
         return None
+
+    def __get_page_for_symbol(self, unique_name, project=None):
+        if not project:
+            project = self.app.project
+
+        page = project.tree.get_page_for_symbol(unique_name)
+        if page:
+            return project, page
+
+        for subproj in project.subprojects.values():
+            subproj, page = self.__get_page_for_symbol(unique_name,
+                                                     project=subproj)
+
+            if page:
+                return subproj, page
+
+        return None, page
+
 
     @classmethod
     def search_online_links(cls, resolver, name):

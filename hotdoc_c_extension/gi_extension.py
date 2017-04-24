@@ -147,27 +147,31 @@ class GIExtension(Extension):
 
     __gathered_gtk_doc_links = False
     __gtkdoc_hrefs = {}
+
+    # Caches are shared between all instances
     __node_cache = {}
+    __parsed_girs = set()
+    __c_names = {}
+    __python_names = {}
+    __javascript_names = {}
+    # We need to collect all class nodes and build the
+    # hierarchy beforehand, because git class nodes do not
+    # know about their children
+    __class_nodes = {}
 
     def __init__(self, app, project):
         Extension.__init__(self, app, project)
 
         self.languages = None
-        self.language = 'c'
 
         self.__nsmap = {'core': 'http://www.gtk.org/introspection/core/1.0',
                       'c': 'http://www.gtk.org/introspection/c/1.0',
                       'glib': 'http://www.gtk.org/introspection/glib/1.0'}
 
-        self.__parsed_girs = set()
 
         # If generating the index ourselves, we will filter these functions
         # out.
         self.__get_type_functions = set({})
-        # We need to collect all class nodes and build the
-        # hierarchy beforehand, because git class nodes do not
-        # know about their children
-        self.__class_nodes = {}
 
         # Only used to reduce debug verbosity
         self.__dropped_symbols = set({})
@@ -176,10 +180,6 @@ class GIExtension(Extension):
 
         self.__gir_hierarchies = {}
         self.__gir_children_map = defaultdict(dict)
-
-        self.__c_names = {}
-        self.__python_names = {}
-        self.__javascript_names = {}
 
         self.__annotation_parser = GIAnnotationParser()
 
@@ -277,23 +277,19 @@ class GIExtension(Extension):
         link_resolver.get_link_signal.connect(self.search_online_links)
         self.formatter.formatting_symbol_signal.connect(self.__formatting_symbol)
 
-        # Make sure extension formatting is the first translating links
-        self.app.link_resolver.resolving_link_signal.disconnect(self.__translate_link_ref)
-        self.app.link_resolver.resolving_link_signal.connect(self.__translate_link_ref)
-
         page.meta['extra']['gi-languages'] = ','.join(self.languages)
+        prev_l = None
         for l in self.languages:
             page.meta['extra']['gi-language'] = l
-            self.setup_language (l)
+            self.setup_language (l, prev_l)
             Extension.format_page (self, page, link_resolver, output)
+            prev_l = l
 
-        self.setup_language(None)
+        self.setup_language(None, l)
+        page.meta['extra']['gi-language'] = self.languages[0]
 
         link_resolver.get_link_signal.disconnect(self.search_online_links)
         self.formatter.formatting_symbol_signal.disconnect(self.__formatting_symbol)
-
-        self.app.link_resolver.resolving_link_signal.disconnect(self.__translate_link_ref)
-        self.app.link_resolver.resolving_link_signal.connect_after(self.__translate_link_ref)
 
     @staticmethod
     def get_dependencies ():
@@ -406,10 +402,12 @@ class GIExtension(Extension):
     def __create_callback_symbol (self, node, parent_name):
         parameters = []
         parameters_nodes = node.find(core_ns('parameters'))
+        name = node.attrib[c_ns('type')]
         if parameters_nodes is None:
             parameters_nodes = []
         for child in parameters_nodes:
-            parameter = self.__create_parameter_symbol (child)
+            parameter = self.__create_parameter_symbol (child,
+                                                        name)
             parameters.append (parameter[0])
 
         return_type = self.__get_return_type_from_callback(node)
@@ -418,12 +416,13 @@ class GIExtension(Extension):
             return_value = [ReturnItemSymbol(type_tokens=tokens)]
         else:
             return_value = [ReturnItemSymbol(type_tokens=[])]
+        self.__add_symbol_attrs(return_value[0], owner_name=name)
 
-        name = node.attrib[c_ns('type')]
         filename = self.__get_symbol_filename(name)
-        sym = self.get_or_create_symbol(CallbackSymbol, parameters=parameters,
-                return_value=return_value, display_name=name,
-                filename=filename, parent_name=parent_name)
+        sym = self.get_or_create_symbol(
+            CallbackSymbol, node, parameters=parameters,
+            return_value=return_value, display_name=name,
+            filename=filename, parent_name=parent_name)
 
         return sym
 
@@ -434,14 +433,15 @@ class GIExtension(Extension):
         members = []
         for field in node.findall(core_ns('member')):
             member = self.get_or_create_symbol(
-                Symbol, display_name=field.attrib[c_ns('identifier')],
+                Symbol, node, display_name=field.attrib[c_ns('identifier')],
                 filename=filename)
             member.enum_value = field.attrib['value']
             members.append(member)
 
-        return self.get_or_create_symbol(EnumSymbol, members=members,
-                                  anonymous=False, display_name=name,
-                                  filename=filename, raw_text=None)
+        return self.get_or_create_symbol(
+            EnumSymbol, node, members=members,
+            anonymous=False, display_name=name,
+            filename=filename, raw_text=None)
 
     def __find_structure_pagename(self, node, unique_name, is_class):
         filename = self.__get_symbol_filename(unique_name)
@@ -617,11 +617,13 @@ class GIExtension(Extension):
             if not klass_name in children:
                 link = Link(None, klass_name, klass_name)
                 sym = QualifiedSymbol(type_tokens=[link])
+                self.__add_symbol_attrs(sym, owner_name=klass_name)
                 children[klass_name] = sym
 
             klass_name = self.__get_klass_name(parent_class)
             link = Link(None, klass_name, klass_name)
             sym = QualifiedSymbol(type_tokens=[link])
+            self.__add_symbol_attrs(sym, owner_name=klass_name)
             hierarchy.append (sym)
 
             klass = parent_class
@@ -681,7 +683,7 @@ class GIExtension(Extension):
 
             self.__gtkdoc_hrefs[name] = online + link
 
-        self.debug('Gathered %d links from devhelp index %s' % (len(keywords), path))
+        # self.info('Gathered %d links from devhelp index %s' % (len(keywords), path))
 
         return True
 
@@ -714,7 +716,7 @@ class GIExtension(Extension):
             self.debug('Gathered %d links from sgml index %s' % (n_links, path))
 
     def __add_annotations (self, formatter, symbol):
-        if self.language == 'c':
+        if symbol.language == 'c':
             annotations = self.__annotation_parser.make_annotations(symbol)
 
             # FIXME: OK this is format time but still seems strange
@@ -737,10 +739,20 @@ class GIExtension(Extension):
 
         if node.attrib.get('introspectable') == '0':
             return False
+
         return True
 
     def __formatting_symbol(self, formatter, symbol):
-        symbol.language = self.language
+        if isinstance(symbol, QualifiedSymbol):
+            unique_name = self.__get_symbol_attr(symbol, 'owner_name')
+        else:
+            unique_name = symbol.unique_name
+
+        project, page = self.__get_page_for_symbol(unique_name)
+        if page:
+            symbol.language = page.meta['extra']['gi-language']
+        else:
+            symbol.language = 'c'
 
         if type(symbol) in [ReturnItemSymbol, ParameterSymbol]:
             self.__add_annotations (formatter, symbol)
@@ -750,8 +762,11 @@ class GIExtension(Extension):
 
         # We discard symbols at formatting time because they might be exposed
         # in other languages
-        if self.language != 'c':
-            return self.__is_introspectable(symbol.unique_name)
+        if symbol.language != 'c':
+            owner_name = self.__get_symbol_attr(symbol, 'owner_name')
+            if not owner_name:
+                owner_name = unique_name
+            return self.__is_introspectable(owner_name)
 
         return True
 
@@ -765,7 +780,14 @@ class GIExtension(Extension):
     def __translate_link_ref(self, link):
         project, page = self.__get_page_for_symbol(link.id_)
 
-        if self.language is None:
+        language = None
+        if page:
+            if page.project_name != self.project.sanitized_name:
+                return None
+
+            language = page.meta.get('extra', {}).get('gi-language')
+
+        if language is None:
             if page and page.extension_name == 'gi-extension':
                 return self.insert_language(link.ref, self.languages[0],
                                             project)
@@ -776,11 +798,11 @@ class GIExtension(Extension):
             return fund.ref
 
         if page and page.extension_name == 'gi-extension':
-            if link.ref and self.language != 'c' and not self.__is_introspectable(link.id_):
-                return self.insert_language(link.ref, 'c',
-                                            project)
-            return self.insert_language(link.ref, self.language,
-                                        project)
+            if link.ref and language != 'c' and not self.__is_introspectable(link.id_):
+                return self.insert_language(link.ref, 'c', project)
+
+            res = self.insert_language(link.ref, language, project)
+            return res
 
         if link.ref == None:
             return self.__gtkdoc_hrefs.get(link.id_)
@@ -804,7 +826,6 @@ class GIExtension(Extension):
 
         return None, page
 
-
     @classmethod
     def search_online_links(cls, resolver, name):
         href = cls.__gtkdoc_hrefs.get(name)
@@ -812,30 +833,27 @@ class GIExtension(Extension):
             return Link(href, name, name)
         return None
 
-    def __translate_link_title(self, link):
+    def __translate_link_title(self, link, language):
         fund = self._fundamentals.get(link.id_)
         if fund:
             return fund._title
 
-        if self.language != 'c' and not self.__is_introspectable(link.id_):
+        if language != 'c' and not self.__is_introspectable(link.id_):
             return link._title + ' (not introspectable)'
 
         translated = self.__translated_names.get(link.id_)
         if translated:
             return translated
 
-        if self.language == 'c' and link.id_ in self.__gtkdoc_hrefs:
+        if language == 'c' and link.id_ in self.__gtkdoc_hrefs:
             return link.id_
 
         return None
 
-    def setup_language (self, language):
-        self.language = language
-
-        try:
-            Link.resolving_title_signal.disconnect(self.__translate_link_title)
-        except KeyError:
-            pass
+    def setup_language (self, language, prev_l):
+        if prev_l:
+            Link.resolving_title_signal.disconnect(self.__translate_link_title,
+                                                   prev_l)
 
         """
         try:
@@ -846,7 +864,8 @@ class GIExtension(Extension):
         """
 
         if language is not None:
-            Link.resolving_title_signal.connect(self.__translate_link_title)
+            Link.resolving_title_signal.connect(self.__translate_link_title,
+                                                language)
             """
             self.project.tree.page_parser.renaming_page_link_signal.connect(
                     self.__rename_page_link)
@@ -910,10 +929,23 @@ class GIExtension(Extension):
 
     # We implement filtering of some symbols
     def get_or_create_symbol(self, *args, **kwargs):
+        args = list(args)
+        node = None
+        if len(args) > 1:
+            node = args.pop(1)
+        aliases = kwargs.get('aliases', [])
+
         if self.smart_index:
             res = self.__smart_filter(*args, **kwargs)
-            return res
-        return super(GIExtension, self).get_or_create_symbol(*args, **kwargs)
+        else:
+            res = super(GIExtension, self).get_or_create_symbol(*args, **kwargs)
+
+        if node is not None and res:
+            self.__node_cache[res.unique_name] = node
+            for alias in aliases:
+                self.__node_cache[alias] = node
+
+        return res
 
     def __unnest_type (self, parameter):
         array_nesting = 0
@@ -974,6 +1006,14 @@ class GIExtension(Extension):
 
         return tokens
 
+    def __add_symbol_attrs(self, symbol, **kwargs):
+        for key, val in kwargs.items():
+            symbol.add_extension_attribute(self.extension_name, key, val)
+
+    def __get_symbol_attr(self, symbol, attrname):
+        return symbol.extension_attributes.get(self.extension_name, {}).get(
+            attrname, None)
+
     def __type_tokens_and_gi_name_from_gi_node (self, gi_node):
         type_, array_nesting = self.__unnest_type (gi_node)
 
@@ -1000,40 +1040,42 @@ class GIExtension(Extension):
             ptype_name = namespaced
         return type_tokens, ptype_name, ctype_name
 
-    def __create_parameter_symbol (self, gi_parameter):
+    def __create_parameter_symbol (self, gi_parameter, owner_name):
         param_name = gi_parameter.attrib['name']
 
         type_tokens, gi_name, ctype_name = self.__type_tokens_and_gi_name_from_gi_node (gi_parameter)
 
-        res = ParameterSymbol (argname=param_name, type_tokens=type_tokens)
-        res.add_extension_attribute ('gi-extension', 'gi_name', gi_name)
-
         direction = gi_parameter.attrib.get('direction')
         if direction is None:
             direction = 'in'
-        res.add_extension_attribute ('gi-extension', 'direction', direction)
+
+        res = ParameterSymbol(argname=param_name, type_tokens=type_tokens)
+        self.__add_symbol_attrs(res, gi_name=gi_name, owner_name=owner_name,
+                                direction=direction)
 
         return res, direction
 
-    def __create_return_value_symbol (self, gi_retval, out_parameters):
+    def __create_return_value_symbol (self, gi_retval, out_parameters, owner_name):
         type_tokens, gi_name, ctype_name = self.__type_tokens_and_gi_name_from_gi_node(gi_retval)
 
         if gi_name == 'none':
             ret_item = None
         else:
             ret_item = ReturnItemSymbol (type_tokens=type_tokens)
-            ret_item.add_extension_attribute('gi-extension', 'gi_name', gi_name)
+            self.__add_symbol_attrs(ret_item, gi_name=gi_name,
+                                    owner_name=owner_name)
 
         res = [ret_item]
 
         for out_param in out_parameters:
             ret_item = ReturnItemSymbol (type_tokens=out_param.input_tokens,
                     name=out_param.argname)
+            self.__add_symbol_attrs(ret_item, owner_name=owner_name)
             res.append(ret_item)
 
         return res
 
-    def __create_parameters_and_retval (self, node):
+    def __create_parameters_and_retval (self, node, owner_name):
         gi_parameters = node.find('{http://www.gtk.org/introspection/core/1.0}parameters')
 
         if gi_parameters is None:
@@ -1047,18 +1089,21 @@ class GIExtension(Extension):
         parameters = []
 
         if instance_param is not None:
-            param, direction = self.__create_parameter_symbol (instance_param)
+            param, direction = self.__create_parameter_symbol (instance_param,
+                                                               owner_name)
             parameters.append (param)
 
         out_parameters = []
         for gi_parameter in gi_parameters:
-            param, direction = self.__create_parameter_symbol (gi_parameter)
+            param, direction = self.__create_parameter_symbol (gi_parameter,
+                                                               owner_name)
             parameters.append (param)
             if direction != 'in':
                 out_parameters.append (param)
 
         retval = node.find('{http://www.gtk.org/introspection/core/1.0}return-value')
-        retval = self.__create_return_value_symbol (retval, out_parameters)
+        retval = self.__create_return_value_symbol (retval, out_parameters,
+                                                    owner_name)
 
         return (parameters, retval)
 
@@ -1077,14 +1122,14 @@ class GIExtension(Extension):
             if direction == 'out' or direction == 'inout':
                 out_parameters.append (param)
 
-        symbol.add_extension_attribute ('gi-extension',
-                'parameters', in_parameters)
+        self.__add_symbol_attrs(symbol, parameters=in_parameters)
 
     def __create_signal_symbol (self, node, parent_name):
         unique_name, name, klass_name = self.__get_symbol_names(node)
 
-        parameters, retval = self.__create_parameters_and_retval (node)
-        res = self.get_or_create_symbol(SignalSymbol,
+        parameters, retval = self.__create_parameters_and_retval (node,
+                                                                  unique_name)
+        res = self.get_or_create_symbol(SignalSymbol, node,
                 parameters=parameters, return_value=retval,
                 display_name=name, unique_name=unique_name,
                 filename=self.__get_symbol_filename(klass_name),
@@ -1117,7 +1162,7 @@ class GIExtension(Extension):
 
         type_tokens, gi_name, ctype_name = self.__type_tokens_and_gi_name_from_gi_node(node)
         type_ = QualifiedSymbol (type_tokens=type_tokens)
-        type_.add_extension_attribute('gi-extension', 'gi_name', gi_name)
+        self.__add_symbol_attrs(type_, gi_name=gi_name, owner_name=unique_name)
 
         flags = []
         writable = node.attrib.get('writable')
@@ -1132,7 +1177,7 @@ class GIExtension(Extension):
         elif construct == '1':
             flags.append (ConstructFlag())
 
-        res = self.get_or_create_symbol(PropertySymbol,
+        res = self.get_or_create_symbol(PropertySymbol, node,
                 prop_type=type_,
                 display_name=name,
                 unique_name=unique_name,
@@ -1162,8 +1207,9 @@ class GIExtension(Extension):
                             description=param_comment.description,
                             annotations=param_comment.annotations))
 
-        parameters, retval = self.__create_parameters_and_retval (node)
-        symbol = self.get_or_create_symbol(VFunctionSymbol,
+        parameters, retval = self.__create_parameters_and_retval (node,
+                                                                  unique_name)
+        symbol = self.get_or_create_symbol(VFunctionSymbol, node,
                 parameters=parameters,
                 return_value=retval, display_name=name,
                 unique_name=unique_name,
@@ -1190,10 +1236,14 @@ class GIExtension(Extension):
 
         type_tokens, gi_name, ctype_name = self.__type_tokens_and_gi_name_from_gi_node(node)
         aliased_type = QualifiedSymbol(type_tokens=type_tokens)
+        self.__add_symbol_attrs(aliased_type, owner_name=name)
         filename = self.__get_symbol_filename(name)
 
-        return self.get_or_create_symbol(AliasSymbol, aliased_type=aliased_type,
-                display_name=name, filename=filename, parent_name=parent_name)
+        return self.get_or_create_symbol(AliasSymbol, node,
+                                         aliased_type=aliased_type,
+                                         display_name=name,
+                                         filename=filename,
+                                         parent_name=parent_name)
 
     def __create_structure(self, symbol_type, node, gi_name):
         if node.attrib.get(glib_ns('fundamental')) == '1':
@@ -1246,7 +1296,7 @@ class GIExtension(Extension):
                                                          klass_name,
                                                          unique_name)
 
-        return self.get_or_create_symbol(ClassSymbol,
+        return self.get_or_create_symbol(ClassSymbol, node,
                                          hierarchy=hierarchy,
                                          children=children,
                                          display_name=klass_name,
@@ -1278,16 +1328,18 @@ class GIExtension(Extension):
             children = field.getchildren()
             if not children:
                 continue
+
             if children[0].tag == core_ns('callback'):
                 field_name = field.attrib['name'] + '()'
                 type_ = self.__get_return_type_from_callback(children[0])
 
                 struct_str += "\n    %s %s (" % (type_, field_name[:-2])
                 parameters_nodes = children[0].find(core_ns('parameters'))
-                if parameters_nodes:
+                if parameters_nodes is not None:
                     for j, gi_parameter in enumerate(parameters_nodes):
                         param_name = gi_parameter.attrib['name']
-                        type_tokens, gi_name, ctype_name = self.__type_tokens_and_gi_name_from_gi_node(gi_parameter)
+                        type_tokens, gi_name, ctype_name = self.__type_tokens_and_gi_name_from_gi_node(
+                            gi_parameter)
                         struct_str += "%s%s %s" % (', ' if j else '', ctype_name, param_name)
                 struct_str += ");"
             else:
@@ -1306,12 +1358,14 @@ class GIExtension(Extension):
             name = "%s.%s" % (struct_name, field_name)
             aliases = ["%s::%s" % (struct_name, field_name)]
             qtype = QualifiedSymbol(type_tokens=tokens)
+            self.__add_symbol_attrs(qtype, owner_name=struct_name)
             member = self.get_or_create_symbol(
-                FieldSymbol,
+                FieldSymbol, field,
                 member_name=field_name, qtype=qtype,
                 filename=filename, display_name=name,
                 unique_name=name, parent_name=parent_name,
                 aliases=aliases)
+            self.__add_symbol_attrs(member, owner_name=struct_name)
             members.append(member)
         struct_str += '\n};'
 
@@ -1324,7 +1378,7 @@ class GIExtension(Extension):
             node, filename, struct_name,
             parent_name=struct_name)
 
-        return self.get_or_create_symbol(StructSymbol,
+        return self.get_or_create_symbol(StructSymbol, node,
                                   display_name=struct_name,
                                   unique_name=struct_name,
                                   anonymous=False,
@@ -1334,7 +1388,7 @@ class GIExtension(Extension):
                                   raw_text=raw_text)
 
     def __create_interface_symbol (self, node, unique_name, filename):
-        return self.get_or_create_symbol(InterfaceSymbol,
+        return self.get_or_create_symbol(InterfaceSymbol, node,
                 display_name=unique_name,
                 unique_name=unique_name,
                 filename=filename)
@@ -1377,7 +1431,8 @@ class GIExtension(Extension):
 
         self.__add_translations(name, node)
 
-        gi_params, retval = self.__create_parameters_and_retval (node)
+        gi_params, retval = self.__create_parameters_and_retval (node,
+                                                                 name)
 
         if node.tag.endswith ('method'):
             type_ = MethodSymbol
@@ -1385,7 +1440,7 @@ class GIExtension(Extension):
             type_ = ConstructorSymbol
         else:
             type_ = FunctionSymbol
-        func = self.get_or_create_symbol(type_,
+        func = self.get_or_create_symbol(type_, node,
                                          parameters=gi_params,
                                          return_value=retval,
                                          display_name=name,

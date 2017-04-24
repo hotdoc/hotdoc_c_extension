@@ -11,4 +11,3 @@ static void
 obj_obj_init (ObjObj *self)
 {
 }
-

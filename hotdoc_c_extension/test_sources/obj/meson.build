@@ -1,4 +1,4 @@
-project('object', 'c', version : '1.0')
+project('obj', 'c', version : '1.0')
 
 gnome = import('gnome')
 files_ = ['obj.c', 'obj.h']
@@ -11,5 +11,9 @@ gir = gnome.generate_gir(objectlib,
       namespace : 'Obj',
       identifier_prefix : 'Obj',
       symbol_prefix : 'obj',
+      includes : ['GLib-2.0', 'GObject-2.0'],
       install : true,
 )
+
+dep = declare_dependency(link_with: objectlib, dependencies : [gobj],
+        include_directories: include_directories('.'))

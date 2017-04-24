@@ -38,8 +38,8 @@ class GIFormatter(Formatter):
         out = template.render ({'flags': flags})
         return out
 
-    def _format_type_tokens (self, type_tokens):
-        if self.extension.language != 'c':
+    def _format_type_tokens (self, type_tokens, language='c'):
+        if language != 'c':
             new_tokens = []
             for tok in type_tokens:
                 # FIXME : shouldn't we rather QualifiedSymbol.get_type_link() ?
@@ -54,7 +54,12 @@ class GIFormatter(Formatter):
                 retval[0].get_extension_attribute('gi-extension',
                         'gi_name') == 'none'
 
-        if self.extension.language == 'c':
+        if not is_void:
+            language = retval[0].language
+        else:
+            language = 'c'
+
+        if language == 'c':
             if is_void:
                 retval = [None]
             else:
@@ -62,10 +67,13 @@ class GIFormatter(Formatter):
         elif is_void:
             retval = retval[1:] or [None]
 
+        args = list(args)
+        args[0] = retval
         return Formatter._format_return_value_symbol (self, *args)
 
     def _format_parameter_symbol (self, parameter):
-        if self.extension.language != 'c':
+        language = parameter.language
+        if language != 'c':
             direction = parameter.get_extension_attribute ('gi-extension',
                     'direction')
             if direction == 'out':
@@ -81,7 +89,11 @@ class GIFormatter(Formatter):
         return res
 
     def _format_linked_symbol (self, symbol):
-        if self.extension.language == 'c':
+        if not symbol:
+            return Formatter._format_linked_symbol (self, symbol)
+
+        language = symbol.language
+        if language == 'c':
             res = Formatter._format_linked_symbol (self, symbol)
             if symbol == None:
                 res = 'void'
@@ -98,13 +110,14 @@ class GIFormatter(Formatter):
         fund = self.extension._fundamentals.get(gi_name)
         if fund:
             link = Link(fund.ref, fund._title, gi_name)
-            return self._format_type_tokens ([link])
+            return self._format_type_tokens ([link], language=language)
 
-        res = self._format_type_tokens (symbol.type_tokens)
+        res = self._format_type_tokens (symbol.type_tokens, language=language)
         return res
 
     def _format_prototype (self, function, is_pointer, title):
-        if self.extension.language == 'c':
+        language = function.language
+        if language == 'c':
             return Formatter._format_prototype (self, function,
                     is_pointer, title)
 
@@ -116,18 +129,18 @@ class GIFormatter(Formatter):
 
         c_name = function._make_name()
 
-        if self.extension.language == 'python':
+        if language == 'python':
             template = self.engine.get_template('python_prototype.html')
         else:
             template = self.engine.get_template('javascript_prototype.html')
 
         if type (function) == SignalSymbol:
-            comment = "%s callback for the '%s' signal" % (self.extension.language, c_name)
+            comment = "%s callback for the '%s' signal" % (language, c_name)
         elif type (function) == VFunctionSymbol:
             comment = "%s implementation of the '%s' virtual method" % \
-                    (self.extension.language, c_name)
+                    (language, c_name)
         else:
-            comment = "%s wrapper for '%s'" % (self.extension.language,
+            comment = "%s wrapper for '%s'" % (language,
                     c_name)
 
         res = template.render ({'return_value': function.return_value,
@@ -139,17 +152,19 @@ class GIFormatter(Formatter):
 
     def _format_gi_vmethod (self, vmethod):
         title = vmethod.link.title
-        if self.extension.language == 'python':
+        language = vmethod.language
+        if language == 'python':
             vmethod.link.title = 'do_%s' % vmethod._make_name()
             title = 'do_%s' % title
-        elif self.extension.language == 'javascript':
+        elif language == 'javascript':
             vmethod.link.title = '%s::%s' % (vmethod.gi_parent_name, vmethod._make_name())
             title = 'vfunc_%s' % title
         return self._format_callable (vmethod, "virtual method",
                 title)
 
     def _format_struct (self, struct,):
-        if self.extension.language == 'c':
+        language = struct.language
+        if language == 'c':
             return Formatter._format_struct (self, struct)
         members_list = self._format_members_list (struct.members, 'Attributes',
                                                   struct)
@@ -160,7 +175,8 @@ class GIFormatter(Formatter):
         return (out, False)
 
     def _format_constant(self, constant):
-        if self.extension.language == 'c':
+        language = constant.language
+        if language == 'c':
             return Formatter._format_constant (self, constant)
 
         template = self.engine.get_template('constant.html')
@@ -187,7 +203,7 @@ class GIFormatter(Formatter):
         return out
 
     def get_output_folder(self, page):
-        lang_path = self.extension.language or self.extension.languages[0]
+        lang_path = page.meta['extra']['gi-language']
         return os.path.join(super().get_output_folder(page), lang_path)
 
     def patch_page(self, page, symbol, output):

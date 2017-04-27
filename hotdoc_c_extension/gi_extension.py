@@ -1329,6 +1329,7 @@ class GIExtension(Extension):
             if not children:
                 continue
 
+            type_gi_name = None
             if children[0].tag == core_ns('callback'):
                 field_name = field.attrib['name'] + '()'
                 type_ = self.__get_return_type_from_callback(children[0])
@@ -1348,16 +1349,20 @@ class GIExtension(Extension):
                 if array_type:
                     type_ = array_type
                 else:
-                    type_ = field.find(core_ns('type')).attrib[c_ns('type')]
+                    type_node = field.find(core_ns('type'))
+                    type_ = type_node.attrib[c_ns('type')]
+                    type_gi_name = type_node.attrib.get('name')
                 struct_str += "\n    %s %s;" % (type_, field_name)
 
             if field.attrib.get('private', False):
                 struct_str += " /* < private > */"
 
-            tokens = self.__type_tokens_from_cdecl (type_)
             name = "%s.%s" % (struct_name, field_name)
             aliases = ["%s::%s" % (struct_name, field_name)]
+
+            tokens = self.__type_tokens_from_cdecl (type_)
             qtype = QualifiedSymbol(type_tokens=tokens)
+
             self.__add_symbol_attrs(qtype, owner_name=struct_name)
             member = self.get_or_create_symbol(
                 FieldSymbol, field,
@@ -1365,7 +1370,8 @@ class GIExtension(Extension):
                 filename=filename, display_name=name,
                 unique_name=name, parent_name=parent_name,
                 aliases=aliases)
-            self.__add_symbol_attrs(member, owner_name=struct_name)
+            self.__add_symbol_attrs(member, owner_name=struct_name,
+                                    type_gi_name=type_gi_name)
             members.append(member)
         struct_str += '\n};'
 

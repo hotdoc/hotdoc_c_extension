@@ -383,10 +383,16 @@ class TestGiExtension(HotdocTest):
         return _html
 
     def assertLinkEqual(self, app, filename, text, expected_link, n_link=0):
-        with open(os.path.join(app.output, "html", filename), 'r') as _:
+        filename = os.path.join(app.output, "html", filename)
+        with open(filename, 'r') as _:
             funchtml = etree.HTML(_.read())
 
-        link = [a for a in funchtml.findall('.//a') if a.text == text][n_link]
+        try:
+            link = [a for a in funchtml.findall('.//a') if a.text == text][n_link]
+        except Exception as _:
+            self.assertIsNone("Could not find %s on the %sth link in file %s: %s"
+                            % (text, n_link, filename, _))
+
         self.assertEqual(link.attrib['href'], expected_link)
 
     def test_link_for_lang_in_another_project(self):
@@ -483,7 +489,7 @@ class TestGiExtension(HotdocTest):
         struct_fieldnames = [i.text for i in _html.findall(
             './/div[@id="ObjObjClass"]//code')]
         self.assertEqual(struct_fieldnames,
-                         ['ObjObjClass.parent:', 'ObjObjClass._padding:'])
+                         ['ObjObjClass.parent:', 'ObjObjClass.a_string:', 'ObjObjClass._padding:'])
 
     def test_python_argument_formating(self):
         app = self.create_project_and_run(project_path='func',
@@ -493,3 +499,12 @@ class TestGiExtension(HotdocTest):
         app.project.extensions['gi-extension'].formatter._format_parameter_symbol(param)
         self.assertTrue('*' not in param.extension_contents['type-link'],
                           param.extension_contents['type-link'])
+
+    def test_python_const_gchar_strut_members(self):
+        app = self.create_project_and_run(project_path='obj',
+                                          extra_conf={'languages': ['python']})
+
+        # const gchar * should link to unicode strings in python
+        html = self.get_html(app, "Miscellaneous.html", language='python')
+        link_to_a_string = html.find('.//tr[@id="ObjObjClass.a_string"]//a[@title="unicode"]')
+        self.assertEqual(link_to_a_string .text, "unicode")

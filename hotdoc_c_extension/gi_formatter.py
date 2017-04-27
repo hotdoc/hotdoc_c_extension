@@ -38,15 +38,27 @@ class GIFormatter(Formatter):
         out = template.render ({'flags': flags})
         return out
 
-    def _format_type_tokens (self, type_tokens, language='c'):
+    def _format_type_tokens(self, symbol, type_tokens):
+        language = symbol.language
         if language != 'c':
+
+            gi_name = symbol.get_extension_attribute('gi-extension', 'type_gi_name')
+            if not gi_name:
+                symbol.get_extension_attribute('gi-extension', 'gi_name')
+            if gi_name:
+                fund = self.extension._fundamentals.get(gi_name)
+                if fund:
+                    return Formatter._format_type_tokens (
+                        self, symbol, [Link(fund.ref, fund._title, gi_name)])
+
             new_tokens = []
             for tok in type_tokens:
                 # FIXME : shouldn't we rather QualifiedSymbol.get_type_link() ?
                 if tok not in ['*', 'const ', 'restrict ', 'volatile ']:
                     new_tokens.append (tok)
-            return Formatter._format_type_tokens (self, new_tokens)
-        return Formatter._format_type_tokens (self, type_tokens)
+            return Formatter._format_type_tokens (self, symbol, new_tokens)
+
+        return Formatter._format_type_tokens (self, symbol, type_tokens)
 
     def _format_return_value_symbol (self, *args):
         retval = args[0]
@@ -103,17 +115,10 @@ class GIFormatter(Formatter):
             return Formatter._format_linked_symbol (self, symbol)
 
         gi_name = symbol.get_extension_attribute ('gi-extension', 'gi_name')
+        if gi_name:
+            return self._format_type_tokens (symbol, symbol.type_tokens)
 
-        if gi_name is None:
-            return Formatter._format_linked_symbol (self, symbol)
-
-        fund = self.extension._fundamentals.get(gi_name)
-        if fund:
-            link = Link(fund.ref, fund._title, gi_name)
-            return self._format_type_tokens ([link], language=language)
-
-        res = self._format_type_tokens (symbol.type_tokens, language=language)
-        return res
+        return Formatter._format_linked_symbol (self, symbol)
 
     def _format_prototype (self, function, is_pointer, title):
         language = function.language

@@ -20,8 +20,16 @@ and/or use gtk-doc annotations.  -->
            glib:type-name="ObjObj"
            glib:get-type="obj_obj_get_type"
            glib:type-struct="ObjClass">
-      <field name="parent_instance">
+      <field name="parent">
         <type name="GObject.Object" c:type="GObject"/>
+      </field>
+      <field name="a_string">
+        <type name="utf8" c:type="const gchar*"/>
+      </field>
+      <field name="_padding">
+        <array zero-terminated="0" c:type="gpointer" fixed-size="10">
+          <type name="gpointer" c:type="gpointer"/>
+        </array>
       </field>
     </class>
     <record name="ObjClass"
@@ -29,6 +37,9 @@ and/or use gtk-doc annotations.  -->
             glib:is-gtype-struct-for="Obj">
       <field name="parent">
         <type name="GObject.ObjectClass" c:type="GObjectClass"/>
+      </field>
+      <field name="a_string">
+        <type name="utf8" c:type="const gchar*"/>
       </field>
       <field name="_padding">
         <array zero-terminated="0" c:type="gpointer" fixed-size="10">

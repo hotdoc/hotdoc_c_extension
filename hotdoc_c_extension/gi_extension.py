@@ -791,7 +791,6 @@ class GIExtension(Extension):
             if page and page.extension_name == 'gi-extension':
                 return self.insert_language(link.ref, self.languages[0],
                                             project)
-            return None
 
         fund = self._fundamentals.get(link.id_)
         if fund:
@@ -804,7 +803,7 @@ class GIExtension(Extension):
             res = self.insert_language(link.ref, language, project)
             return res
 
-        if link.ref == None:
+        if link.ref is None:
             return self.__gtkdoc_hrefs.get(link.id_)
 
         return None

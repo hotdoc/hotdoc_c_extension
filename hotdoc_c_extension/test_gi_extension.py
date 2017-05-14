@@ -8,7 +8,10 @@ from hotdoc.tests.fixtures import HotdocTest
 from hotdoc.core.config import Config
 from hotdoc.core.database import Database
 from hotdoc.core.comment import Comment
+from hotdoc.utils.loggable import Logger
 from hotdoc_c_extension.gi_extension import GIExtension, DEFAULT_PAGE
+
+Logger.silent = True
 
 HERE = os.path.realpath(os.path.dirname(__file__))
 
@@ -264,14 +267,13 @@ class TestGiExtension(HotdocTest):
             extra_conf=extra_conf)
 
     def build_tree(self, pages, page, node):
-
         pnode = OrderedDict()
         symbols = []
 
         for symbol in page.symbols:
             symbols.append(
-                OrderedDict({'name': symbol.unique_name,
-                             'parent_name': symbol.parent_name}))
+                OrderedDict([('name', symbol.unique_name),
+                             ('parent_name', symbol.parent_name)]))
         pnode['symbols'] = symbols
 
         subpages = OrderedDict({})
@@ -299,7 +301,6 @@ class TestGiExtension(HotdocTest):
         tree = app.project.tree
         root = tree.root
         self.assertEqual(root.source_file, 'gi-index')
-        print(root.subpages)
         self.assertEqual(list(root.subpages),
                          ['test-greeter.h', 'test-gobject-macros.h',
                           'test-interface.h', DEFAULT_PAGE,
@@ -367,7 +368,7 @@ class TestGiExtension(HotdocTest):
         nstructure = copy.deepcopy(STRUCTURE)
         del nstructure['gi-index']['subpages'][DEFAULT_PAGE]
         nstructure['gi-index']['subpages']['test-greeter.h']['symbols'].insert(
-            9999, OrderedDict({'name': 'TestUndocumentedFlag', 'parent_name': None}))
+            9999, OrderedDict([('name', 'TestUndocumentedFlag'), ('parent_name', None)]))
         if os.environ.get('PRINT_STRUCTURE'):
             import pprint
             pprint.pprint(structure)

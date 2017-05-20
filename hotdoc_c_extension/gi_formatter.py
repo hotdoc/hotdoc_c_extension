@@ -23,6 +23,8 @@ import lxml.etree
 
 
 class GIFormatter(Formatter):
+    sitemap_language = None
+
     def __init__(self, gi_extension):
         module_path = os.path.dirname(__file__)
         searchpath = [os.path.join(module_path, "templates")]
@@ -208,7 +210,7 @@ class GIFormatter(Formatter):
         return out
 
     def get_output_folder(self, page):
-        lang_path = page.meta['extra']['gi-language']
+        lang_path = GIFormatter.sitemap_language or page.meta['extra']['gi-language']
         return os.path.join(super().get_output_folder(page), lang_path)
 
     def patch_page(self, page, symbol, output):

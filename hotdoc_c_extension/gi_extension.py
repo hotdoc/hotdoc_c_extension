@@ -291,6 +291,22 @@ class GIExtension(Extension):
         link_resolver.get_link_signal.disconnect(self.search_online_links)
         self.formatter.formatting_symbol_signal.disconnect(self.__formatting_symbol)
 
+    def write_out_page(self, output, page):
+        prev_l = None
+        for l in self.languages:
+            page.meta['extra']['gi-language'] = l
+            self.setup_language (l, prev_l)
+            Extension.write_out_page (self, output, page)
+            prev_l = l
+        self.setup_language(None, l)
+
+    def write_out_sitemap(self, opath):
+        for l in self.languages:
+            GIFormatter.sitemap_language = l
+            lopath = os.path.join(os.path.dirname(opath), '%s-%s' % (l, os.path.basename(opath)))
+            Extension.write_out_sitemap (self, lopath)
+        GIFormatter.sitemap_language = None
+
     @staticmethod
     def get_dependencies ():
         return [ExtDependency('c-extension', is_upstream=True, optional=True)]

@@ -78,6 +78,11 @@ class GIFormatter(Formatter):
                 retval = [None]
             else:
                 retval = retval[:1]
+
+            for item in retval:
+                if item:
+                    item.formatted_link = ''
+
         elif is_void:
             retval = retval[1:] or [None]
 

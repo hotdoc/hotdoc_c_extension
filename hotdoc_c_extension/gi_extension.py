@@ -324,17 +324,14 @@ class GIExtension(Extension):
 
     def __get_symbol_names(self, node):
         if node.tag in (core_ns('class')):
-            unique_name = self.__get_klass_name (node)
-
-            return unique_name, unique_name, unique_name
+            _ = self.__get_klass_name (node)
+            return _, _, _
         elif node.tag in (core_ns('interface')):
-            unique_name = self.__get_klass_name (node)
-
-            return unique_name, unique_name, unique_name
+            _ = self.__get_klass_name (node)
+            return _, _, _
         elif node.tag in (core_ns('function'), core_ns('method'), core_ns('constructor')):
-            fname = self.__get_function_name(node)
-
-            return fname, fname, fname
+            _ = self.__get_function_name(node)
+            return _, _, _
         elif node.tag == core_ns('virtual-method'):
             klass_node = node.getparent()
             ns = klass_node.getparent()
@@ -344,42 +341,34 @@ class GIExtension(Extension):
             parent_name = self.__get_structure_name(klass_structure_node)
             name = node.attrib['name']
             unique_name = '%s::%s' % (parent_name, name)
-            display_name = '%s.%s' % (parent_name, name)
-
-            return unique_name, display_name, unique_name
+            return unique_name, name, unique_name
         elif node.tag == core_ns('field'):
             structure_node = node.getparent()
             parent_name = self.__get_structure_name(structure_node)
             name = node.attrib['name']
             unique_name = '%s::%s' % (parent_name, name)
-
             return unique_name, name, unique_name
         elif node.tag == core_ns('property'):
             parent_name = self.__get_klass_name(node.getparent())
             klass_name = '%s::%s' % (parent_name, parent_name)
             name = node.attrib['name']
             unique_name = '%s:%s' % (parent_name, name)
-
             return unique_name, name, klass_name
         elif node.tag == glib_ns('signal'):
             parent_name = self.__get_klass_name(node.getparent())
             klass_name = '%s::%s' % (parent_name, parent_name)
             name = node.attrib['name']
             unique_name = '%s::%s' % (parent_name, name)
-
             return unique_name, name, klass_name
         elif node.tag == core_ns('alias'):
-            name = node.attrib.get(c_ns('type'))
-
-            return name, name, name
+            _ = node.attrib.get(c_ns('type'))
+            return _, _, _
         elif node.tag == core_ns('record'):
-            name = self.__get_structure_name(node)
-
-            return name, name, name
+            _ = self.__get_structure_name(node)
+            return _, _, _
         elif node.tag in (core_ns('enumeration'), core_ns('bitfield')):
-            name = node.attrib[c_ns('type')]
-
-            return name, name, name
+            _ = node.attrib[c_ns('type')]
+            return _, _, _
 
         return None, None, None
 
@@ -736,8 +725,9 @@ class GIExtension(Extension):
             annotations = self.__annotation_parser.make_annotations(symbol)
 
             # FIXME: OK this is format time but still seems strange
-            extra_content = formatter.format_annotations (annotations)
-            symbol.extension_contents['Annotations'] = extra_content
+            if annotations:
+                extra_content = formatter.format_annotations (annotations)
+                symbol.extension_contents['Annotations'] = extra_content
         else:
             symbol.extension_contents.pop('Annotations', None)
 

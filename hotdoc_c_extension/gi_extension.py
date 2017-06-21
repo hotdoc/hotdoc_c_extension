@@ -1407,6 +1407,7 @@ class GIExtension(Extension):
             type_ = ConstructorSymbol
         else:
             type_ = FunctionSymbol
+            parent_name = None
         func = self.get_or_create_symbol(type_, node,
                                          parameters=gi_params,
                                          return_value=retval,

@@ -141,6 +141,9 @@ DEFAULT_PAGE_COMMENT = """/**
 """
 
 
+OUTPUT_LANGUAGES = ['c', 'python', 'javascript']
+
+
 class GIExtension(Extension):
     extension_name = "gi-extension"
     argument_prefix = "gi"
@@ -151,9 +154,7 @@ class GIExtension(Extension):
     # Caches are shared between all instances
     __node_cache = {}
     __parsed_girs = set()
-    __c_names = {}
-    __python_names = {}
-    __javascript_names = {}
+    __translated_names = {l: {} for l in OUTPUT_LANGUAGES}
     # We need to collect all class nodes and build the
     # hierarchy beforehand, because git class nodes do not
     # know about their children
@@ -178,8 +179,6 @@ class GIExtension(Extension):
 
         self.__annotation_parser = GIAnnotationParser()
 
-        self.__translated_names = {}
-
         self.__gen_index_path = None
 
         self.__current_output_filename = None
@@ -195,8 +194,8 @@ class GIExtension(Extension):
         GIExtension.add_sources_argument(group, prefix='gi-c')
         group.add_argument ("--languages", action="store",
                 nargs='*',
-                help="Languages to translate documentation in (c, python,"
-                     "javascript), default is to make all languages")
+                help="Languages to translate documentation in %s"
+                     ", default is to make all languages" % str (OUTPUT_LANGUAGES))
 
     def parse_config(self, config):
         super(GIExtension, self).parse_config(config)
@@ -208,7 +207,7 @@ class GIExtension(Extension):
             self.languages.remove ('c')
             self.languages.insert (0, 'c')
         if not self.languages:
-            self.languages = ['c', 'python', 'javascript']
+            self.languages = OUTPUT_LANGUAGES
         for gir_file in self.sources:
             gir_root = etree.parse(gir_file).getroot()
             self.__cache_nodes(gir_root)
@@ -721,7 +720,7 @@ class GIExtension(Extension):
         if node is None:
             return False
 
-        if not name in self.__c_names:
+        if not name in self.__translated_names['c']:
             self.__add_translations(name, node)
 
         if node.attrib.get('introspectable') == '0':
@@ -817,7 +816,7 @@ class GIExtension(Extension):
         if language != 'c' and not self.__is_introspectable(link.id_, language):
             return link._title + ' (not introspectable)'
 
-        translated = self.__translated_names.get(link.id_)
+        translated = self.__translated_names[language].get(link.id_)
         if translated:
             return translated
 
@@ -841,15 +840,6 @@ class GIExtension(Extension):
             self.app.link_resolver.resolving_link_signal.connect(self.__translate_link_ref, language)
         else:
             self.app.link_resolver.resolving_link_signal.connect_after(self.__translate_link_ref, self.languages[0])
-
-        if language == 'c':
-            self.__translated_names = self.__c_names
-        elif language == 'python':
-            self.__translated_names = self.__python_names
-        elif language == 'javascript':
-            self.__translated_names = self.__javascript_names
-        else:
-            self.__translated_names = {}
 
     def __smart_filter(self, *args, **kwargs):
         name = kwargs['display_name']
@@ -1389,14 +1379,14 @@ class GIExtension(Extension):
         gi_name = '.'.join(components)
 
         if id_key in node.attrib:
-            self.__python_names[unique_name] = gi_name
+            self.__translated_names['python'][unique_name] = gi_name
             components[-1] = 'prototype.%s' % components[-1]
-            self.__javascript_names[unique_name] = '.'.join(components)
-            self.__c_names[unique_name] = unique_name
+            self.__translated_names['javascript'][unique_name] = '.'.join(components)
+            self.__translated_names['c'][unique_name] = unique_name
         elif id_type in node.attrib:
-            self.__python_names[unique_name] = gi_name
-            self.__javascript_names[unique_name] = gi_name
-            self.__c_names[unique_name] = unique_name
+            self.__translated_names['python'][unique_name] = gi_name
+            self.__translated_names['javascript'][unique_name] = gi_name
+            self.__translated_names['c'][unique_name] = unique_name
 
         return components, gi_name
 

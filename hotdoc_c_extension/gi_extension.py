@@ -168,11 +168,6 @@ class GIExtension(Extension):
                       'c': 'http://www.gtk.org/introspection/c/1.0',
                       'glib': 'http://www.gtk.org/introspection/glib/1.0'}
 
-
-        # If generating the index ourselves, we will filter these functions
-        # out.
-        self.__get_type_functions = set({})
-
         # Only used to reduce debug verbosity
         self.__dropped_symbols = set({})
 
@@ -538,9 +533,6 @@ class GIExtension(Extension):
             if node.tag in [class_tag, interface_tag]:
                 gi_name = '.'.join(self.__get_gi_name_components(node))
                 self.__class_nodes[gi_name] = node
-                get_type_function = node.attrib.get('{%s}get-type' %
-                    self.__nsmap['glib'])
-                self.__get_type_functions.add(get_type_function)
                 self.__node_cache['%s::%s' % (name, name)] = node
                 self.__generate_smart_filters(id_prefixes, sym_prefixes, node)
 
@@ -870,12 +862,6 @@ class GIExtension(Extension):
 
         if name in self.__smart_filters:
             self.debug('Dropping %s' % name)
-            self.__dropped_symbols.add(name)
-            return None
-
-        # Drop get_type functions
-        if name in self.__get_type_functions:
-            self.debug('Dropping get_type function %s' % name)
             self.__dropped_symbols.add(name)
             return None
 

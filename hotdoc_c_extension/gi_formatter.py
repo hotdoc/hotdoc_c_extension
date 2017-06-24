@@ -42,7 +42,7 @@ class GIFormatter(Formatter):
         return out
 
     def _format_type_tokens(self, symbol, type_tokens):
-        language = symbol.language
+        language = symbol.get_extension_attribute(self.extension.extension_name, 'language')
         if language != 'c':
 
             gi_name = symbol.get_extension_attribute('gi-extension', 'type_gi_name')
@@ -70,7 +70,7 @@ class GIFormatter(Formatter):
                         'gi_name') == 'none'
 
         if not is_void:
-            language = retval[0].language
+            language = retval[0].get_extension_attribute(self.extension.extension_name, 'language')
         else:
             language = 'c'
 
@@ -92,7 +92,7 @@ class GIFormatter(Formatter):
         return Formatter._format_return_value_symbol (self, *args)
 
     def _format_parameter_symbol (self, parameter):
-        language = parameter.language
+        language = parameter.get_extension_attribute(self.extension.extension_name, 'language')
         if language != 'c':
             direction = parameter.get_extension_attribute ('gi-extension',
                     'direction')
@@ -112,7 +112,7 @@ class GIFormatter(Formatter):
         if not symbol:
             return Formatter._format_linked_symbol (self, symbol)
 
-        language = symbol.language
+        language = symbol.get_extension_attribute(self.extension.extension_name, 'language')
         if language == 'c':
             res = Formatter._format_linked_symbol (self, symbol)
             if symbol == None:
@@ -129,7 +129,7 @@ class GIFormatter(Formatter):
         return Formatter._format_linked_symbol (self, symbol)
 
     def _format_prototype (self, function, is_pointer, title):
-        language = function.language
+        language = function.get_extension_attribute(self.extension.extension_name, 'language')
         if language == 'c':
             return Formatter._format_prototype (self, function,
                     is_pointer, title)
@@ -165,7 +165,7 @@ class GIFormatter(Formatter):
 
     def _format_vfunction_symbol (self, vmethod):
         title = vmethod.link.title
-        language = vmethod.language
+        language = vmethod.get_extension_attribute(self.extension.extension_name, 'language')
         if language == 'python':
             vmethod.link.title = 'do_%s' % vmethod._make_name()
             title = 'do_%s' % title
@@ -175,7 +175,7 @@ class GIFormatter(Formatter):
         return Formatter._format_vfunction_symbol (self, vmethod)
 
     def _format_struct (self, struct):
-        language = struct.language
+        language = struct.get_extension_attribute(self.extension.extension_name, 'language')
         if language == 'c':
             return Formatter._format_struct (self, struct)
         members_list = self._format_members_list (struct.members, 'Attributes',
@@ -188,14 +188,14 @@ class GIFormatter(Formatter):
 
     def _format_class_symbol (self, klass):
         saved_raw_text = klass.raw_text
-        if klass.language != 'c':
+        if klass.get_extension_attribute(self.extension.extension_name, 'language') != 'c':
             klass.raw_text = None
         out = Formatter._format_class_symbol(self, klass)
         klass.raw_text = saved_raw_text
         return out
 
     def _format_constant(self, constant):
-        language = constant.language
+        language = constant.get_extension_attribute(self.extension.extension_name, 'language')
         if language == 'c':
             return Formatter._format_constant (self, constant)
 

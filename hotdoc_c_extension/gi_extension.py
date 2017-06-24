@@ -710,7 +710,7 @@ class GIExtension(Extension):
             self.debug('Gathered %d links from sgml index %s' % (n_links, path))
 
     def __add_annotations (self, formatter, symbol):
-        if symbol.language == 'c':
+        if symbol.get_extension_attribute(self.extension_name, 'language') == 'c':
             annotations = self.__annotation_parser.make_annotations(symbol)
 
             # FIXME: OK this is format time but still seems strange
@@ -745,9 +745,11 @@ class GIExtension(Extension):
 
         project, page = self.__get_page_for_symbol(unique_name)
         if page:
-            symbol.language = page.meta['extra']['gi-language']
+            language = page.meta['extra']['gi-language']
         else:
-            symbol.language = 'c'
+            language = 'c'
+
+        symbol.add_extension_attribute(self.extension_name, 'language', language)
 
         if type(symbol) in [ReturnItemSymbol, ParameterSymbol]:
             self.__add_annotations (formatter, symbol)
@@ -757,11 +759,11 @@ class GIExtension(Extension):
 
         # We discard symbols at formatting time because they might be exposed
         # in other languages
-        if symbol.language != 'c':
+        if language != 'c':
             owner_name = self.__get_symbol_attr(symbol, 'owner_name')
             if not owner_name:
                 owner_name = unique_name
-            return self.__is_introspectable(owner_name, symbol.language)
+            return self.__is_introspectable(owner_name, language)
 
         return True
 

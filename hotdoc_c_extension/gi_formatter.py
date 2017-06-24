@@ -20,6 +20,7 @@ import os
 from hotdoc.core.formatter import Formatter
 from hotdoc.core.symbols import *
 import lxml.etree
+from .fundamentals import FUNDAMENTALS
 
 
 class GIFormatter(Formatter):
@@ -48,7 +49,7 @@ class GIFormatter(Formatter):
             if not gi_name:
                 symbol.get_extension_attribute('gi-extension', 'gi_name')
             if gi_name:
-                fund = self.extension._fundamentals.get(gi_name)
+                fund = FUNDAMENTALS[language].get(gi_name)
                 if fund:
                     return Formatter._format_type_tokens (
                         self, symbol, [Link(fund.ref, fund._title, gi_name)])
@@ -156,25 +157,24 @@ class GIFormatter(Formatter):
                     c_name)
 
         res = template.render ({'return_value': function.return_value,
-            'function_name': title, 'parameters':
+            'parent_name': function.parent_name, 'function_name': title, 'parameters':
             params, 'comment': comment, 'throws': function.throws,
             'out_params': [], 'is_method': isinstance(function, MethodSymbol)})
 
         return res
 
-    def _format_gi_vmethod (self, vmethod):
+    def _format_vfunction_symbol (self, vmethod):
         title = vmethod.link.title
         language = vmethod.language
         if language == 'python':
             vmethod.link.title = 'do_%s' % vmethod._make_name()
             title = 'do_%s' % title
         elif language == 'javascript':
-            vmethod.link.title = '%s::%s' % (vmethod.gi_parent_name, vmethod._make_name())
+            vmethod.link.title = '%s::%s' % (vmethod.parent_name, vmethod._make_name())
             title = 'vfunc_%s' % title
-        return self._format_callable (vmethod, "virtual method",
-                title)
+        return Formatter._format_vfunction_symbol (self, vmethod)
 
-    def _format_struct (self, struct,):
+    def _format_struct (self, struct):
         language = struct.language
         if language == 'c':
             return Formatter._format_struct (self, struct)
@@ -185,6 +185,14 @@ class GIFormatter(Formatter):
         out = template.render ({"symbol": struct,
                                 "members_list": members_list})
         return (out, False)
+
+    def _format_class_symbol (self, klass):
+        saved_raw_text = klass.raw_text
+        if klass.language != 'c':
+            klass.raw_text = None
+        out = Formatter._format_class_symbol(self, klass)
+        klass.raw_text = saved_raw_text
+        return out
 
     def _format_constant(self, constant):
         language = constant.language

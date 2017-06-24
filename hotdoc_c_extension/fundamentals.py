@@ -164,5 +164,6 @@ def _create_python_fundamentals():
 
     return fundamentals
 
-JS_FUNDAMENTALS = _create_javascript_fundamentals()
-PY_FUNDAMENTALS = _create_python_fundamentals()
+FUNDAMENTALS = {'javascript': _create_javascript_fundamentals(),
+        'python': _create_python_fundamentals(),
+        'c': {}}

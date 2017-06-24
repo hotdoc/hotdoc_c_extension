@@ -41,7 +41,7 @@ from hotdoc.utils.utils import OrderedSet
 
 from .gi_formatter import GIFormatter
 from .gi_annotation_parser import GIAnnotationParser
-from .fundamentals import PY_FUNDAMENTALS, JS_FUNDAMENTALS
+from .fundamentals import FUNDAMENTALS
 
 from hotdoc.parsers.gtk_doc import GtkDocParser
 from .utils.utils import CCommentExtractor
@@ -185,8 +185,6 @@ class GIExtension(Extension):
 
         self.__translated_names = {}
 
-        self._fundamentals = {}
-
         self.__gen_index_path = None
 
         self.__current_output_filename = None
@@ -228,15 +226,7 @@ class GIExtension(Extension):
         return 'GObject API Reference'
 
     def _get_all_sources(self):
-        if self.c_sources:
-            headers = [s for s in self.c_sources if s.endswith('.h')]
-            return headers
-        else:
-            # FIXME Keeping backward compatibility
-            # Do we want to keep that?
-             c_extension = self.project.extensions.get('c-extension')
-             if c_extension:
-                return c_extension._get_all_sources()
+        return [s for s in self.c_sources if s.endswith('.h')]
 
     def __find_package_root(self):
         if self.__package_root:
@@ -260,9 +250,8 @@ class GIExtension(Extension):
             return
 
         self.__scan_comments()
-        self.info('Gathering legacy gtk-doc links')
         self.__scan_sources()
-        self.app.link_resolver.resolving_link_signal.connect_after(self.__translate_link_ref)
+        self.app.link_resolver.resolving_link_signal.connect_after(self.__translate_link_ref, self.languages[0])
 
     def __scan_comments(self):
         comment_parser = GtkDocParser(self.project)
@@ -731,8 +720,8 @@ class GIExtension(Extension):
         else:
             symbol.extension_contents.pop('Annotations', None)
 
-    def __is_introspectable(self, name):
-        if name in self._fundamentals:
+    def __is_introspectable(self, name, language):
+        if name in FUNDAMENTALS[language]:
             return True
 
         node = self.__node_cache.get(name)
@@ -772,7 +761,7 @@ class GIExtension(Extension):
             owner_name = self.__get_symbol_attr(symbol, 'owner_name')
             if not owner_name:
                 owner_name = unique_name
-            return self.__is_introspectable(owner_name)
+            return self.__is_introspectable(owner_name, symbol.language)
 
         return True
 
@@ -783,31 +772,19 @@ class GIExtension(Extension):
         p = pathlib.Path(ref)
         return str(pathlib.Path(p.parts[0], language, *p.parts[1:]))
 
-    def __translate_link_ref(self, link):
+    def __translate_link_ref(self, link, language):
         project, page = self.__get_page_for_symbol(link.id_)
 
-        language = None
         if page:
-            if page.project_name != self.project.sanitized_name:
-                return None
-
-            language = page.meta.get('extra', {}).get('gi-language')
-
-        if language is None:
-            if page and page.extension_name == 'gi-extension':
-                return self.insert_language(link.ref, self.languages[0],
-                                            project)
-
-        fund = self._fundamentals.get(link.id_)
-        if fund:
-            return fund.ref
-
-        if page and page.extension_name == 'gi-extension':
-            if link.ref and language != 'c' and not self.__is_introspectable(link.id_):
+            if link.ref and language != 'c' and not self.__is_introspectable(link.id_, language):
                 return self.insert_language(link.ref, 'c', project)
 
             res = self.insert_language(link.ref, language, project)
             return res
+
+        fund = FUNDAMENTALS[language].get(link.id_)
+        if fund:
+            return fund.ref
 
         if link.ref is None:
             return self.__gtkdoc_hrefs.get(link.id_)
@@ -839,11 +816,11 @@ class GIExtension(Extension):
         return None
 
     def __translate_link_title(self, link, language):
-        fund = self._fundamentals.get(link.id_)
+        fund = FUNDAMENTALS[language].get(link.id_)
         if fund:
             return fund._title
 
-        if language != 'c' and not self.__is_introspectable(link.id_):
+        if language != 'c' and not self.__is_introspectable(link.id_, language):
             return link._title + ' (not introspectable)'
 
         translated = self.__translated_names.get(link.id_)
@@ -859,34 +836,25 @@ class GIExtension(Extension):
         if prev_l:
             Link.resolving_title_signal.disconnect(self.__translate_link_title,
                                                    prev_l)
+            self.app.link_resolver.resolving_link_signal.disconnect(self.__translate_link_ref, prev_l)
+        else:
+            self.app.link_resolver.resolving_link_signal.disconnect(self.__translate_link_ref, self.languages[0])
 
-        """
-        try:
-            self.project.tree.page_parser.renaming_page_link_signal.disconnect(
-                    self.__rename_page_link)
-        except KeyError:
-            pass
-        """
 
         if language is not None:
             Link.resolving_title_signal.connect(self.__translate_link_title,
                                                 language)
-            """
-            self.project.tree.page_parser.renaming_page_link_signal.connect(
-                    self.__rename_page_link)
-            """
+            self.app.link_resolver.resolving_link_signal.connect(self.__translate_link_ref, language)
+        else:
+            self.app.link_resolver.resolving_link_signal.connect_after(self.__translate_link_ref, self.languages[0])
 
         if language == 'c':
-            self._fundamentals = {}
             self.__translated_names = self.__c_names
         elif language == 'python':
-            self._fundamentals = PY_FUNDAMENTALS
             self.__translated_names = self.__python_names
         elif language == 'javascript':
-            self._fundamentals = JS_FUNDAMENTALS
             self.__translated_names = self.__javascript_names
         else:
-            self._fundamentals = {}
             self.__translated_names = {}
 
     def __smart_filter(self, *args, **kwargs):
@@ -1301,14 +1269,24 @@ class GIExtension(Extension):
                                                          klass_name,
                                                          unique_name)
 
-        return self.get_or_create_symbol(ClassSymbol, node,
+        klass_structure_node = node.getparent().xpath('.//core:record[@name="%s"]' %
+                node.attrib.get(glib_ns('type-struct')), namespaces=self.__nsmap)[0]
+
+        res = self.get_or_create_symbol(ClassSymbol, node,
                                          hierarchy=hierarchy,
                                          children=children,
                                          display_name=klass_name,
                                          unique_name=unique_name,
                                          filename=filename,
+                                         raw_text=raw_text,
                                          members=members,
                                          parent_name=unique_name)
+
+        self.__add_symbol_attrs(res, klass_struct=klass_structure_node)
+
+        print (res.extension_attributes)
+
+        return res
 
     def __get_array_type(self, node):
         array = node.find(core_ns('array'))

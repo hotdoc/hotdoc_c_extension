@@ -366,27 +366,27 @@ class GIExtension(Extension):
         gi_name = '.'.join(components)
 
         if node.tag == core_ns('class'):
-            res = self.__create_structure(ClassSymbol, node, gi_name)
+            self.__create_structure(ClassSymbol, node, gi_name)
         elif node.tag in (core_ns('function'), core_ns('method'), core_ns('constructor')):
-            res = self.__create_function_symbol(node, parent_name)
+            self.__create_function_symbol(node, parent_name)
         elif node.tag == core_ns('virtual-method'):
-            res = self.__create_vfunc_symbol(node, parent_name)
+            self.__create_vfunc_symbol(node, parent_name)
         elif node.tag == core_ns('property'):
-            res = self.__create_property_symbol(node, parent_name)
+            self.__create_property_symbol(node, parent_name)
         elif node.tag == glib_ns('signal'):
-            res = self.__create_signal_symbol(node, parent_name)
+            self.__create_signal_symbol(node, parent_name)
         elif node.tag == core_ns('alias'):
-            res = self.__create_alias_symbol(node, gi_name, parent_name)
+            self.__create_alias_symbol(node, gi_name, parent_name)
         elif node.tag == core_ns('record'):
-            res = self.__create_structure(StructSymbol, node, gi_name)
+            self.__create_structure(StructSymbol, node, gi_name)
         elif node.tag == core_ns('interface'):
-            res = self.__create_structure(InterfaceSymbol, node, gi_name)
+            self.__create_structure(InterfaceSymbol, node, gi_name)
         elif node.tag == core_ns('enumeration'):
-            res = self.__create_enum_symbol(node)
+            self.__create_enum_symbol(node)
         elif node.tag == core_ns('bitfield'):
-            res = self.__create_enum_symbol(node)
+            self.__create_enum_symbol(node)
         elif node.tag == core_ns('callback'):
-            res = self.__create_callback_symbol(node, parent_name)
+            self.__create_callback_symbol(node, parent_name)
         elif node.tag == core_ns('field'):
             pass
         else:

@@ -254,7 +254,7 @@ class GIExtension(Extension):
         self.app.database.add_comment(block)
 
         stale_c, unlisted = self.get_stale_files(self.c_sources)
-        CCommentExtractor(self, comment_parser).parse_comments(stale_c)
+        CCommentExtractor(self, comment_parser).parse_comments(stale_c, self.__smart_filters)
 
     def format_page(self, page, link_resolver, output):
         link_resolver.get_link_signal.connect(self.search_online_links)

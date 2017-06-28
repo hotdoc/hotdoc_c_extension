@@ -17,7 +17,8 @@ class CCommentExtractor:
         self.project = extension.project
         self.__raw_comment_parser = comment_parser
 
-    def parse_comments(self, filenames):
+    def parse_comments(self, filenames, filter_names=None):
+        filter_names = filter_names or {}
         for filename in filenames:
             with open (filename, 'rb') as f:
                 debug('Getting comments in %s' % filename)
@@ -43,16 +44,18 @@ class CCommentExtractor:
                             self.app.database.add_comment(block)
                     elif not skip_next_symbol:
                         if header:
-                            self.__create_macro_from_raw_text(c, filename)
+                            self.__create_macro_from_raw_text(c, filename, filter_names)
                     else:
                         skip_next_symbol = False
 
-    def __create_macro_from_raw_text(self, raw, filename):
+    def __create_macro_from_raw_text(self, raw, filename, filter_names):
         mcontent = raw[0].replace('\t', ' ')
         mcontent = mcontent.split(' ', 1)[1]
         split = mcontent.split('(', 1)
         name = split[0]
         if not (' ' in name or '\t' in name) and len(split) == 2:
+            if name in filter_names:
+                return None
             args = split[1].split(')', 1)[0].split(',')
             if args:
                 stripped_name = name.strip()

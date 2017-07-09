@@ -351,8 +351,7 @@ class GIExtension(Extension):
         return None, None, None
 
     def __scan_node(self, node, parent_name=None):
-        components = self.__get_gi_name_components(node)
-        gi_name = '.'.join(components)
+        gi_name = self.__get_gi_name (node)
 
         if node.tag == core_ns('class'):
             self.__create_structure(ClassSymbol, node, gi_name)
@@ -1039,11 +1038,31 @@ class GIExtension(Extension):
 
         self.__add_symbol_attrs(symbol, parameters=in_parameters)
 
+    def __get_gi_name (self, node):
+        components = self.__get_gi_name_components(node)
+        return '.'.join(components)
+
     def __create_signal_symbol (self, node, parent_name):
         unique_name, name, klass_name = self.__get_symbol_names(node)
 
         parameters, retval = self.__create_parameters_and_retval (node,
                                                                   unique_name)
+
+        parent_node = node.getparent()
+        parent_gi_name = self.__get_gi_name(parent_node)
+        parent_link = Link(None, parent_name, parent_name)
+
+        instance_param = ParameterSymbol(argname='self', type_tokens=[parent_link, '*'])
+        self.__add_symbol_attrs (instance_param, gi_name=parent_gi_name,
+            owner_name=unique_name, direction='in')
+        parameters.insert (0, instance_param)
+
+        udata_link = Link(None, 'gpointer', 'gpointer')
+        udata_param = ParameterSymbol(argname='user_data', type_tokens=[udata_link])
+        self.__add_symbol_attrs (udata_param, gi_name='gpointer',
+            owner_name=unique_name, direction='in')
+        parameters.append (udata_param)
+
         res = self.get_or_create_symbol(SignalSymbol, node,
                 parameters=parameters, return_value=retval,
                 display_name=name, unique_name=unique_name,
@@ -1226,8 +1245,6 @@ class GIExtension(Extension):
 
         self.__add_symbol_attrs(res, klass_struct=klass_structure_node)
 
-        print (res.extension_attributes)
-
         return res
 
     def __get_array_type(self, node):
@@ -1326,7 +1343,11 @@ class GIExtension(Extension):
 
     def __get_gi_name_components(self, node):
         parent = node.getparent()
-        components = [node.attrib.get('name', '')]
+        if 'name' in node.attrib:
+            components = [node.attrib.get('name')]
+        else:
+            components = []
+
         while parent is not None:
             try:
                 components.insert(0, parent.attrib['name'])

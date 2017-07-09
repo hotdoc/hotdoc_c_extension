@@ -169,17 +169,12 @@ class GIExtension(Extension):
                       'c': 'http://www.gtk.org/introspection/c/1.0',
                       'glib': 'http://www.gtk.org/introspection/glib/1.0'}
 
-        # Only used to reduce debug verbosity
-        self.__dropped_symbols = set({})
-
         self.__smart_filters = set()
 
         self.__gir_hierarchies = {}
         self.__gir_children_map = defaultdict(dict)
 
         self.__annotation_parser = GIAnnotationParser()
-
-        self.__gen_index_path = None
 
         self.__current_output_filename = None
         self.__class_gtype_structs = {}

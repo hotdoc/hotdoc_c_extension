@@ -841,43 +841,6 @@ class GIExtension(Extension):
         else:
             self.app.link_resolver.resolving_link_signal.connect_after(self.__translate_link_ref, self.languages[0])
 
-    def __smart_filter(self, *args, **kwargs):
-        name = kwargs['display_name']
-
-        # Simply reducing debug verbosity
-        if name in self.__dropped_symbols:
-            return None
-
-        type_ = args[0]
-
-        if name in self.__smart_filters:
-            self.debug('Dropping %s' % name)
-            self.__dropped_symbols.add(name)
-            return None
-
-        # Drop class structures if not documented as well
-        if type_ == StructSymbol:
-            node = self.__node_cache.get(name)
-            if node is not None:
-                disguised = node.attrib.get('disguised')
-                if disguised == '1':
-                    self.debug("Dropping private structure %s" % name)
-                    self.__dropped_symbols.add(name)
-                    return None
-
-        if type_ == ExportedVariableSymbol:
-            if name in ('__inst', '__t', '__r'):
-                return None
-
-        if kwargs.get('filename') == self.__default_page:
-            self.warn("no-location-indication",
-                       "No way to determine where %s should land"
-                       " putting it to %s."
-                       " Document the symbol for smart indexing to work" % (
-                           name, os.path.basename(self.__default_page)))
-
-        return super(GIExtension, self).get_or_create_symbol(*args, **kwargs)
-
     # We implement filtering of some symbols
     def get_or_create_symbol(self, *args, **kwargs):
         args = list(args)
@@ -887,9 +850,15 @@ class GIExtension(Extension):
         aliases = kwargs.get('aliases', [])
 
         if self.smart_index:
-            res = self.__smart_filter(*args, **kwargs)
-        else:
-            res = super(GIExtension, self).get_or_create_symbol(*args, **kwargs)
+            name = kwargs['display_name']
+            if kwargs.get('filename') == self.__default_page:
+                self.warn("no-location-indication",
+                           "No way to determine where %s should land"
+                           " putting it to %s."
+                           " Document the symbol for smart indexing to work" % (
+                               name, os.path.basename(self.__default_page)))
+
+        res = super(GIExtension, self).get_or_create_symbol(*args, **kwargs)
 
         if node is not None and res:
             self.__node_cache[res.unique_name] = node

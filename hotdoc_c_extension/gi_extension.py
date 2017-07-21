@@ -728,7 +728,7 @@ class GIExtension(Extension):
         else:
             unique_name = symbol.unique_name
 
-        project, page = self.__get_page_for_symbol(unique_name)
+        page = self.project.get_page_for_symbol(unique_name)
         if page:
             language = page.meta['extra']['gi-language']
         else:
@@ -760,9 +760,10 @@ class GIExtension(Extension):
         return str(pathlib.Path(p.parts[0], language, *p.parts[1:]))
 
     def __translate_link_ref(self, link, language):
-        project, page = self.__get_page_for_symbol(link.id_)
+        page = self.project.get_page_for_symbol(link.id_)
 
         if page:
+            project = self.project.get_project_for_page (page)
             if link.ref and language != 'c' and not self.__is_introspectable(link.id_, language):
                 return self.insert_language(link.ref, 'c', project)
 
@@ -777,23 +778,6 @@ class GIExtension(Extension):
             return self.__gtkdoc_hrefs.get(link.id_)
 
         return None
-
-    def __get_page_for_symbol(self, unique_name, project=None):
-        if not project:
-            project = self.app.project
-
-        page = project.tree.get_page_for_symbol(unique_name)
-        if page:
-            return project, page
-
-        for subproj in project.subprojects.values():
-            subproj, page = self.__get_page_for_symbol(unique_name,
-                                                     project=subproj)
-
-            if page:
-                return subproj, page
-
-        return None, page
 
     @classmethod
     def search_online_links(cls, resolver, name):

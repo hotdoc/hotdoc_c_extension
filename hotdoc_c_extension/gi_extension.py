@@ -1228,7 +1228,6 @@ class GIExtension(Extension):
                                          raw_text=raw_text,
                                          members=members,
                                          parent_name=unique_name)
-        self.__add_symbol_attrs(res, klass_struct=klass_structure_node)
 
         return res
 

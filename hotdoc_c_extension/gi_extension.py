@@ -236,9 +236,9 @@ class GIExtension(Extension):
 
         super(GIExtension, self).setup()
 
-        if not self.__gathered_gtk_doc_links:
+        if not GIExtension.__gathered_gtk_doc_links:
             self.__gather_gtk_doc_links()
-            self.__gathered_gtk_doc_links = True
+            GIExtension.__gathered_gtk_doc_links = True
 
         if not self.sources:
             return

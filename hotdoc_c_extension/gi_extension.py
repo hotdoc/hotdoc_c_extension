@@ -353,6 +353,8 @@ class GIExtension(Extension):
     def __scan_node(self, node, parent_name=None):
         gi_name = self.__get_gi_name (node)
 
+        if 'moved-to' in node.attrib:
+            return False
         if node.tag == core_ns('class'):
             self.__create_structure(ClassSymbol, node, gi_name)
         elif node.tag in (core_ns('function'), core_ns('method'), core_ns('constructor')):
@@ -1226,7 +1228,6 @@ class GIExtension(Extension):
                                          raw_text=raw_text,
                                          members=members,
                                          parent_name=unique_name)
-
         self.__add_symbol_attrs(res, klass_struct=klass_structure_node)
 
         return res

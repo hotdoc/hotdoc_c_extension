@@ -1216,18 +1216,15 @@ class GIExtension(Extension):
                                                          klass_name,
                                                          unique_name)
 
-        klass_structure_node = node.getparent().xpath('.//core:record[@name="%s"]' %
-                node.attrib.get(glib_ns('type-struct')), namespaces=self.__nsmap)[0]
-
         res = self.get_or_create_symbol(ClassSymbol, node,
-                                         hierarchy=hierarchy,
-                                         children=children,
-                                         display_name=klass_name,
-                                         unique_name=unique_name,
-                                         filename=filename,
-                                         raw_text=raw_text,
-                                         members=members,
-                                         parent_name=unique_name)
+                                        hierarchy=hierarchy,
+                                        children=children,
+                                        display_name=klass_name,
+                                        unique_name=unique_name,
+                                        filename=filename,
+                                        raw_text=raw_text,
+                                        members=members,
+                                        parent_name=unique_name)
 
         return res
 

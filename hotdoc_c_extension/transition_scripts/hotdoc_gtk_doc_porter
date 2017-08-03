@@ -47,7 +47,7 @@ from hotdoc.parsers.gtk_doc import GtkDocStringFormatter
 from hotdoc_c_extension.gi_extension import GIExtension
 from hotdoc.utils.loggable import warn, info, debug, Logger
 
-from hotdoc.utils.utils import all_subclasses, get_installed_extension_classes
+from hotdoc.utils.utils import all_subclasses, get_extension_classes
 
 
 # pylint: disable=too-few-public-methods
@@ -172,7 +172,7 @@ class DocRepoMonitor(object):
         self.class_comments = {}
 
     def build(self, conf_file, args):
-        ext_classes = get_installed_extension_classes(sort=True)
+        ext_classes = get_extension_classes(sort=True)
         self.app = Application(ext_classes)
         conf = self.conf = Config(conf_file=conf_file)
         self.app.parse_config(conf)

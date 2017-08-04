@@ -253,21 +253,21 @@ class GIExtension(Extension):
 
     def format_page(self, page, link_resolver, output):
         link_resolver.get_link_signal.connect(self.search_online_links)
-        self.formatter.formatting_symbol_signal.connect(self.__formatting_symbol)
 
-        page.meta['extra']['gi-languages'] = ','.join(self.languages)
         prev_l = None
+        page.meta['extra']['gi-languages'] = ','.join(self.languages)
         for l in self.languages:
+            self.formatter.formatting_symbol_signal.connect(self.__formatting_symbol, l)
             page.meta['extra']['gi-language'] = l
             self.setup_language (l, prev_l)
             Extension.format_page (self, page, link_resolver, output)
             prev_l = l
+            self.formatter.formatting_symbol_signal.disconnect(self.__formatting_symbol, l)
 
         self.setup_language(None, l)
         page.meta['extra']['gi-language'] = self.languages[0]
 
         link_resolver.get_link_signal.disconnect(self.search_online_links)
-        self.formatter.formatting_symbol_signal.disconnect(self.__formatting_symbol)
 
     def write_out_page(self, output, page):
         prev_l = None
@@ -724,18 +724,7 @@ class GIExtension(Extension):
 
         return True
 
-    def __formatting_symbol(self, formatter, symbol):
-        if isinstance(symbol, QualifiedSymbol):
-            unique_name = self.__get_symbol_attr(symbol, 'owner_name')
-        else:
-            unique_name = symbol.unique_name
-
-        page = self.project.get_page_for_symbol(unique_name)
-        if page:
-            language = page.meta['extra']['gi-language']
-        else:
-            language = 'c'
-
+    def __formatting_symbol(self, formatter, symbol, language):
         symbol.add_extension_attribute(self.extension_name, 'language', language)
 
         if type(symbol) in [ReturnItemSymbol, ParameterSymbol]:
@@ -747,10 +736,7 @@ class GIExtension(Extension):
         # We discard symbols at formatting time because they might be exposed
         # in other languages
         if language != 'c':
-            owner_name = self.__get_symbol_attr(symbol, 'owner_name')
-            if not owner_name:
-                owner_name = unique_name
-            return self.__is_introspectable(owner_name, language)
+            return self.__is_introspectable(symbol.unique_name, language)
 
         return True
 

@@ -751,6 +751,9 @@ class GIExtension(Extension):
         page = self.project.get_page_for_symbol(link.id_)
 
         if page:
+            if page.extension_name != self.extension_name:
+                return None
+
             project = self.project.get_project_for_page (page)
             if link.ref and language != 'c' and not self.__is_introspectable(link.id_, language):
                 return self.insert_language(link.ref, 'c', project)

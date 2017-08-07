@@ -52,7 +52,7 @@ def _create_javascript_fundamentals():
             'gchararray': string_link,
             'gunichar': string_link,
             'utf8': string_link,
-            'gchar': number_link,
+            'gchar': string_link,
             'guchar': number_link,
             'gint8': number_link,
             'guint8': number_link,
@@ -84,33 +84,29 @@ def _create_javascript_fundamentals():
 
 def _create_python_fundamentals():
     string_link = \
-            Link('https://docs.python.org/2.7/library/functions.html#str',
+            Link('https://docs.python.org/3/library/functions.html#str',
                 'str', None)
     boolean_link = \
-            Link('https://docs.python.org/2.7/library/functions.html#bool',
+            Link('https://docs.python.org/3/library/functions.html#bool',
                     'bool', None)
     true_link = \
-            Link('https://docs.python.org/2/library/constants.html#True',
+            Link('https://docs.python.org/3/library/constants.html#True',
                 'True', None)
     false_link = \
-           Link('https://docs.python.org/2/library/constants.html#False',
+           Link('https://docs.python.org/3/library/constants.html#False',
                 'False', None)
     pointer_link = \
-            Link('https://docs.python.org/2.7/library/functions.html#object',
+            Link('https://docs.python.org/3/library/functions.html#object',
                 'object', None)
     integer_link = \
-            Link('https://docs.python.org/2/library/functions.html#int',
+            Link('https://docs.python.org/3/library/functions.html#int',
                     'int', None)
     float_link = \
-            Link('https://docs.python.org/2/library/functions.html#float',
+            Link('https://docs.python.org/3/library/functions.html#float',
                     'float', None)
     none_link = \
-            Link('https://docs.python.org/2/library/constants.html#None',
+            Link('https://docs.python.org/3/library/constants.html#None',
                     'None', None)
-    unicode_link = \
-            Link('https://docs.python.org/2/library/functions.html#unicode',
-                    'unicode', None)
-
     gtype_link = \
             Link('https://developer.gnome.org/gobject/stable/'
                     'gobject-Type-Information.html#GType',
@@ -131,7 +127,7 @@ def _create_python_fundamentals():
             "guint16": integer_link,
             "gint32": integer_link,
             "guint32": integer_link,
-            "gchar": integer_link,
+            "gchar": string_link,
             "guchar": integer_link,
             "gshort": integer_link,
             "gushort": integer_link,
@@ -139,8 +135,8 @@ def _create_python_fundamentals():
             "guint": integer_link,
             "gfloat": float_link,
             "gdouble": float_link,
-            "utf8": unicode_link,
-            "gunichar": unicode_link,
+            "utf8": string_link,
+            "gunichar": string_link,
             "filename": string_link,
             "gchararray": string_link,
             "GType": gtype_link,

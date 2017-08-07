@@ -820,12 +820,15 @@ class GIExtension(Extension):
 
         if self.smart_index:
             name = kwargs['display_name']
-            if kwargs.get('filename') == self.__default_page:
-                self.warn("no-location-indication",
-                           "No way to determine where %s should land"
-                           " putting it to %s."
-                           " Document the symbol for smart indexing to work" % (
-                               name, os.path.basename(self.__default_page)))
+            if kwargs.get('filename', self.__default_page) == self.__default_page:
+                unique_name = kwargs.get('unique_name', kwargs.get('display_name'))
+                kwargs['filename'] = self.__get_symbol_filename(unique_name)
+                if kwargs.get('filename', self.__default_page) == self.__default_page:
+                    self.warn("no-location-indication",
+                              "No way to determine where %s should land"
+                              " putting it to %s."
+                              " Document the symbol for smart indexing to work" % (
+                              name, os.path.basename(self.__default_page)))
 
         res = super(GIExtension, self).get_or_create_symbol(*args, **kwargs)
 

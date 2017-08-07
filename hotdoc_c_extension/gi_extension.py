@@ -918,6 +918,10 @@ class GIExtension(Extension):
             ctype_name = ptype_.attrib.get('{http://www.gtk.org/introspection/c/1.0}type')
             ptype_name = ptype_.attrib.get('name')
 
+        # gchar ** is being typed to utf8* by GI, special case it.
+        if array_nesting == 1 and type_.attrib.get(c_ns('type')) == 'gchar**':
+            ctype_name = 'gchar**'
+
         cur_ns = self.__get_namespace(gi_node)
 
         if ctype_name is not None:

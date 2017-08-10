@@ -1179,9 +1179,7 @@ class GIExtension(Extension):
                                                   symbol_type == ClassSymbol)
 
         self.__current_output_filename = filename
-        for cnode in node:
-            self.__scan_node(cnode, parent_name=unique_name)
-
+        parent_name = unique_name
         if symbol_type == ClassSymbol:
             res = self.__create_class_symbol(node, gi_name,
                                             klass_name,
@@ -1194,11 +1192,16 @@ class GIExtension(Extension):
             sym = self.__class_gtype_structs.get(node.attrib['name'])
             res = self.__create_struct_symbol(node, unique_name, filename,
                                               sym.unique_name if sym else None)
+            parent_name = sym.unique_name if sym else unique_name
         else:  # Interface
             res = self.__create_interface_symbol(node, unique_name, filename)
             class_struct =  node.attrib.get(glib_ns('type-struct'))
             if class_struct:
                 self.__class_gtype_structs[class_struct] = res
+
+        for cnode in node:
+            self.__scan_node(cnode, parent_name=parent_name)
+
         self.__current_output_filename = None
 
         return res

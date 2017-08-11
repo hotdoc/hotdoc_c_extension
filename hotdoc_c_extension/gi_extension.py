@@ -155,6 +155,7 @@ class GIExtension(Extension):
     __node_cache = {}
     __parsed_girs = set()
     __translated_names = {l: {} for l in OUTPUT_LANGUAGES}
+    __aliased_links = {l: {} for l in OUTPUT_LANGUAGES}
     # We need to collect all class nodes and build the
     # hierarchy beforehand, because git class nodes do not
     # know about their children
@@ -748,8 +749,15 @@ class GIExtension(Extension):
         return str(pathlib.Path(p.parts[0], language, *p.parts[1:]))
 
     def __translate_link_ref(self, link, language):
-        page = self.project.get_page_for_symbol(link.id_)
+        fund = FUNDAMENTALS[language].get(link.id_)
+        if fund:
+            return fund.ref
 
+        aliased_link = self.__aliased_links[language].get(link.id_)
+        if aliased_link:
+            return self.__translate_link_ref(aliased_link, language)
+
+        page = self.project.get_page_for_symbol(link.id_)
         if page:
             if page.extension_name != self.extension_name:
                 return None
@@ -760,10 +768,6 @@ class GIExtension(Extension):
 
             res = self.insert_language(link.ref, language, project)
             return res
-
-        fund = FUNDAMENTALS[language].get(link.id_)
-        if fund:
-            return fund.ref
 
         if link.ref is None:
             return self.__gtkdoc_hrefs.get(link.id_)
@@ -784,6 +788,10 @@ class GIExtension(Extension):
 
         if language != 'c' and not self.__is_introspectable(link.id_, language):
             return link._title + ' (not introspectable)'
+
+        aliased_link = self.__aliased_links[language].get(link.id_)
+        if aliased_link:
+            return self.__translate_link_title(aliased_link, language)
 
         translated = self.__translated_names[language].get(link.id_)
         if translated:
@@ -1154,6 +1162,16 @@ class GIExtension(Extension):
         aliased_type = QualifiedSymbol(type_tokens=type_tokens)
         self.__add_symbol_attrs(aliased_type, owner_name=name)
         filename = self.__get_symbol_filename(name)
+
+        alias_link = [l for l in type_tokens if isinstance(l, Link)]
+        for lang in ('python', 'javascript'):
+            fund_type = FUNDAMENTALS[lang].get(ctype_name)
+            if fund_type:
+                # The alias name is now conciderd as a FUNDAMENTAL type.
+                FUNDAMENTALS[lang][name] = fund_type
+            else:
+                if alias_link:
+                    self.__aliased_links[lang][name] = alias_link[0]
 
         return self.get_or_create_symbol(AliasSymbol, node,
                                          aliased_type=aliased_type,

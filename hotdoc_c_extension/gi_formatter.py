@@ -239,6 +239,14 @@ class GIFormatter(Formatter):
 
         return super()._format_callable(callable_, callable_type, title, is_pointer)
 
+    def _format_property_symbol(self, prop):
+        language = prop.get_extension_attribute(self.extension.extension_name, 'language')
+        if language == 'python':
+            prop.link.title = 'self.props.%s' % prop.display_name.replace('-', '_')
+
+        return super()._format_property_symbol(prop)
+
+
     def _format_alias(self, alias):
         language = alias.get_extension_attribute(self.extension.extension_name, 'language')
         if language == 'c':

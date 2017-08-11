@@ -1189,10 +1189,19 @@ class GIExtension(Extension):
             if class_struct:
                 self.__class_gtype_structs[class_struct] = res
         elif symbol_type == StructSymbol:
-            sym = self.__class_gtype_structs.get(node.attrib['name'])
+            # If we are working with a Class structure,
+            class_symbol = self.__class_gtype_structs.get(node.attrib['name'])
+            if class_symbol:
+                parent_name = class_symbol.unique_name
+
+                # Class struct should never be renderer on their own,
+                # smart_key will lookup the value in that dict
+                self.__class_gtype_structs[unique_name] = class_symbol
             res = self.__create_struct_symbol(node, unique_name, filename,
-                                              sym.unique_name if sym else None)
-            parent_name = sym.unique_name if sym else unique_name
+                                              class_symbol.unique_name if class_symbol else None)
+
+            if class_symbol:
+                class_symbol.extra['class_structure'] = res
         else:  # Interface
             res = self.__create_interface_symbol(node, unique_name, filename)
             class_struct =  node.attrib.get(glib_ns('type-struct'))
@@ -1392,5 +1401,9 @@ class GIExtension(Extension):
         return self.__translated_names.get(original_name)
 
     def _get_smart_key(self, symbol):
+        if self.__class_gtype_structs.get(symbol.unique_name):
+            # Working with a Class Structure, not adding it anywhere
+            return None
+
         return symbol.extra.get('implementation_filename',
                                 super()._get_smart_key(symbol))

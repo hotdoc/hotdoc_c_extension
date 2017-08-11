@@ -190,7 +190,16 @@ class GIFormatter(Formatter):
         saved_raw_text = klass.raw_text
         if klass.get_extension_attribute(self.extension.extension_name, 'language') != 'c':
             klass.raw_text = None
-        out = Formatter._format_class_symbol(self, klass)
+        out = list(Formatter._format_class_symbol(self, klass))
+
+        if klass.get_extension_attribute(self.extension.extension_name, 'language') == 'c':
+            # Render class structure if available.
+            klass_struct =  klass.extra.get('class_structure')
+            if klass_struct:
+                klass_struct.resolve_links(self.extension.app.link_resolver)
+                out[0] += self.format_symbol(klass_struct,
+                                             self.extension.app.link_resolver)
+
         klass.raw_text = saved_raw_text
         return out
 

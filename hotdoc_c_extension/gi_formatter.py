@@ -231,6 +231,14 @@ class GIFormatter(Formatter):
 
         return out
 
+    def _format_callable(self, callable_, callable_type, title,
+                         is_pointer=False):
+        language = callable_.get_extension_attribute(self.extension.extension_name, 'language')
+        if language == 'python' and isinstance(callable_, ClassMethodSymbol):
+            return (None, None)
+
+        return super()._format_callable(callable_, callable_type, title, is_pointer)
+
     def get_output_folder(self, page):
         lang_path = GIFormatter.sitemap_language or page.meta['extra']['gi-language']
         return os.path.join(super().get_output_folder(page), lang_path)

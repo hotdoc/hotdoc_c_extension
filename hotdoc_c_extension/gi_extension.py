@@ -1367,7 +1367,10 @@ class GIExtension(Extension):
                                                                  name)
 
         if node.tag.endswith ('method'):
-            type_ = MethodSymbol
+            if node.getparent().attrib.get(glib_ns('is-gtype-struct-for')):
+                type_ = ClassMethodSymbol
+            else:
+                type_ = MethodSymbol
         elif node.tag==core_ns('constructor'):
             type_ = ConstructorSymbol
         else:

@@ -862,7 +862,10 @@ class GIExtension(Extension):
             if array is None:
                 array = parameter.find(core_ns('type[@name="GLib.List"]'))
 
-        return glist or parameter, array_nesting
+        if glist is not None:
+            parameter = glist
+
+        return parameter, array_nesting
 
     def __type_tokens_from_cdecl (self, cdecl):
         indirection = cdecl.count ('*')

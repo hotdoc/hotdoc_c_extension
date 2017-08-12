@@ -1284,9 +1284,11 @@ class GIExtension(Extension):
         struct_str = "struct %s {" % struct_name
         members = []
         for field in node.findall(core_ns('field')):
-            # Weed out vmethods, handled separately
             children = field.getchildren()
             if not children:
+                continue
+
+            if field.attrib.get('private', False):
                 continue
 
             type_gi_name = None
@@ -1303,6 +1305,9 @@ class GIExtension(Extension):
                             self.__type_tokens_and_gi_name_from_gi_node(gi_parameter)
                         struct_str += "%s%s %s" % (', ' if j else '', ctype_name, param_name)
                 struct_str += ");"
+
+                # Weed out vmethods, handled separately
+                continue
             else:
                 field_name = field.attrib['name']
                 array_type = self.__get_array_type(field)
@@ -1314,8 +1319,6 @@ class GIExtension(Extension):
                     type_gi_name = type_node.attrib.get('name')
                 struct_str += "\n    %s %s;" % (type_, field_name)
 
-            if field.attrib.get('private', False):
-                struct_str += " /* < private > */"
 
             name = "%s.%s" % (struct_name, field_name)
             aliases = ["%s::%s" % (struct_name, field_name)]

@@ -1241,6 +1241,8 @@ class GIExtension(Extension):
                 self.__class_gtype_structs[class_struct] = res
 
         for cnode in node:
+            if cnode.tag in [core_ns('record'), core_ns('union')]:
+                continue
             self.__scan_node(cnode, parent_name=parent_name)
 
         self.__current_output_filename = None
@@ -1283,10 +1285,36 @@ class GIExtension(Extension):
 
         return return_node.find(core_ns('type')).attrib[c_ns('type')]
 
-    def __get_structure_members(self, node, filename, struct_name, parent_name):
-        struct_str = "struct %s {" % struct_name
+    def __get_structure_members(self, node, filename, struct_name, parent_name,
+                                is_union=False, indent=4 * ' ',
+                                concatenated_name=None, in_union=False):
+        if is_union:
+            sname = ''
+        else:
+            sname = struct_name + ' ' if struct_name is not None else ''
+
+        struct_str = "%s%s{" % ('union ' if is_union else 'struct ', sname)
         members = []
-        for field in node.findall(core_ns('field')):
+        for field in node.getchildren():
+            if field.tag in [core_ns('record'), core_ns('union')]:
+                if not concatenated_name:
+                    concatenated_name = parent_name
+
+                if struct_name and struct_name != parent_name:
+                    concatenated_name += '.' + struct_name
+
+                new_union = field.tag == core_ns('union')
+                union_members, union_str = self.__get_structure_members(
+                    field, filename, field.attrib.get('name', None),
+                    parent_name, indent=indent + 4 * ' ',
+                    is_union=new_union, concatenated_name=concatenated_name,
+                    in_union=in_union or new_union)
+                struct_str += "\n%s%s" % (indent, union_str)
+                members += union_members
+                continue
+            elif field.tag != core_ns('field'):
+                continue
+
             children = field.getchildren()
             if not children:
                 continue
@@ -1299,7 +1327,7 @@ class GIExtension(Extension):
                 field_name = field.attrib['name'] + '()'
                 type_ = self.__get_return_type_from_callback(children[0])
 
-                struct_str += "\n    %s %s (" % (type_, field_name[:-2])
+                struct_str += "\n%s%s %s (" % (indent, type_, field_name[:-2])
                 parameters_nodes = children[0].find(core_ns('parameters'))
                 if parameters_nodes is not None:
                     for j, gi_parameter in enumerate(parameters_nodes):
@@ -1320,10 +1348,10 @@ class GIExtension(Extension):
                     type_node = field.find(core_ns('type'))
                     type_ = type_node.attrib[c_ns('type')]
                     type_gi_name = type_node.attrib.get('name')
-                struct_str += "\n    %s %s;" % (type_, field_name)
+                struct_str += "\n%s%s %s;" % (indent, type_, field_name)
 
 
-            name = "%s.%s" % (struct_name, field_name)
+            name = "%s.%s" % (concatenated_name or struct_name, field_name)
             aliases = ["%s::%s" % (struct_name, field_name)]
 
             tokens = self.__type_tokens_from_cdecl (type_)
@@ -1337,9 +1365,14 @@ class GIExtension(Extension):
                 unique_name=name, parent_name=parent_name,
                 aliases=aliases)
             self.__add_symbol_attrs(member, owner_name=struct_name,
-                                    gi_name=type_gi_name)
+                                    gi_name=type_gi_name,
+                                    in_union=in_union)
             members.append(member)
-        struct_str += '\n};'
+
+        if is_union and struct_name:
+            struct_str += '\n%s} %s;' % (indent[3:], struct_name)
+        else:
+            struct_str += '\n%s};' % indent[3:]
 
         return members, struct_str
 

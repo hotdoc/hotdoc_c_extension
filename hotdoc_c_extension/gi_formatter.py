@@ -186,12 +186,21 @@ class GIFormatter(Formatter):
             title = 'vfunc_%s' % title
         return Formatter._format_vfunction_symbol (self, vmethod)
 
+    def _format_members_list (self, members, member_designation, struct):
+        language = struct.get_extension_attribute(self.extension.extension_name, 'language')
+        if language != 'c':
+            # Never render members that are in a union, introspected won't show them
+            members = [m for m in members if not m.get_extension_attribute(
+                self.extension.extension_name, 'in_union')]
+
+        return super()._format_members_list (members, member_designation, struct)
+
     def _format_struct (self, struct):
         language = struct.get_extension_attribute(self.extension.extension_name, 'language')
         if language == 'c':
             return Formatter._format_struct (self, struct)
-        members_list = self._format_members_list (struct.members, 'Attributes',
-                                                  struct)
+
+        members_list = self._format_members_list (struct.members, 'Attributes', struct)
 
         template = self.engine.get_template ("python_compound.html")
         out = template.render ({"symbol": struct,

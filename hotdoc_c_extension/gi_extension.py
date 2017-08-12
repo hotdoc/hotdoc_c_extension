@@ -850,12 +850,19 @@ class GIExtension(Extension):
     def __unnest_type (self, parameter):
         array_nesting = 0
         array = parameter.find('{http://www.gtk.org/introspection/core/1.0}array')
+        glist = None
+        if array is None:
+            array = parameter.find(core_ns('type[@name="GLib.List"]'))
+            glist = parameter
+
         while array is not None:
             array_nesting += 1
             parameter = array
             array = parameter.find('{http://www.gtk.org/introspection/core/1.0}array')
+            if array is None:
+                array = parameter.find(core_ns('type[@name="GLib.List"]'))
 
-        return parameter, array_nesting
+        return glist or parameter, array_nesting
 
     def __type_tokens_from_cdecl (self, cdecl):
         indirection = cdecl.count ('*')
@@ -942,12 +949,13 @@ class GIExtension(Extension):
         namespaced = '%s.%s' % (cur_ns, ptype_name)
         if namespaced in self.__class_nodes:
             ptype_name = namespaced
-        return type_tokens, ptype_name, ctype_name
+
+        return type_tokens, ptype_name, ctype_name, array_nesting
 
     def __create_parameter_symbol (self, gi_parameter, owner_name):
         param_name = gi_parameter.attrib['name']
 
-        type_tokens, gi_name, ctype_name = self.__type_tokens_and_gi_name_from_gi_node (gi_parameter)
+        type_tokens, gi_name, ctype_name, array_nesting = self.__type_tokens_and_gi_name_from_gi_node (gi_parameter)
 
         direction = gi_parameter.attrib.get('direction')
         if direction is None:
@@ -955,19 +963,20 @@ class GIExtension(Extension):
 
         res = ParameterSymbol(argname=param_name, type_tokens=type_tokens)
         self.__add_symbol_attrs(res, gi_name=gi_name, owner_name=owner_name,
-                                direction=direction)
+                                direction=direction, array_nesting=array_nesting)
 
         return res, direction
 
     def __create_return_value_symbol (self, gi_retval, out_parameters, owner_name):
-        type_tokens, gi_name, ctype_name = self.__type_tokens_and_gi_name_from_gi_node(gi_retval)
+        type_tokens, gi_name, ctype_name, array_nesting = self.__type_tokens_and_gi_name_from_gi_node(gi_retval)
 
         if gi_name == 'none':
             ret_item = None
         else:
             ret_item = ReturnItemSymbol (type_tokens=type_tokens)
             self.__add_symbol_attrs(ret_item, gi_name=gi_name,
-                                    owner_name=owner_name)
+                                    owner_name=owner_name,
+                                    array_nesting=array_nesting)
 
         res = [ret_item]
 
@@ -1084,9 +1093,10 @@ class GIExtension(Extension):
     def __create_property_symbol (self, node, parent_name):
         unique_name, name, klass_name = self.__get_symbol_names(node)
 
-        type_tokens, gi_name, ctype_name = self.__type_tokens_and_gi_name_from_gi_node(node)
+        type_tokens, gi_name, ctype_name, array_nesting = self.__type_tokens_and_gi_name_from_gi_node(node)
         type_ = QualifiedSymbol (type_tokens=type_tokens)
-        self.__add_symbol_attrs(type_, gi_name=gi_name, owner_name=unique_name)
+        self.__add_symbol_attrs(type_, gi_name=gi_name, owner_name=unique_name,
+                                array_nesting=array_nesting)
 
         flags = []
         writable = node.attrib.get('writable')
@@ -1158,9 +1168,10 @@ class GIExtension(Extension):
     def __create_alias_symbol (self, node, gi_name, parent_name):
         name = self.__get_symbol_names(node)[0]
 
-        type_tokens, gi_name, ctype_name = self.__type_tokens_and_gi_name_from_gi_node(node)
+        type_tokens, gi_name, ctype_name, array_nesting = self.__type_tokens_and_gi_name_from_gi_node(node)
         aliased_type = QualifiedSymbol(type_tokens=type_tokens)
-        self.__add_symbol_attrs(aliased_type, owner_name=name)
+        self.__add_symbol_attrs(aliased_type, owner_name=name,
+                                array_nesting=array_nesting)
         filename = self.__get_symbol_filename(name)
 
         alias_link = [l for l in type_tokens if isinstance(l, Link)]
@@ -1288,8 +1299,8 @@ class GIExtension(Extension):
                 if parameters_nodes is not None:
                     for j, gi_parameter in enumerate(parameters_nodes):
                         param_name = gi_parameter.attrib['name']
-                        type_tokens, gi_name, ctype_name = self.__type_tokens_and_gi_name_from_gi_node(
-                            gi_parameter)
+                        type_tokens, gi_name, ctype_name, array_nesting = \
+                            self.__type_tokens_and_gi_name_from_gi_node(gi_parameter)
                         struct_str += "%s%s %s" % (', ' if j else '', ctype_name, param_name)
                 struct_str += ");"
             else:

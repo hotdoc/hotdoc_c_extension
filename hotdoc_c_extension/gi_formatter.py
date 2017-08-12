@@ -48,17 +48,31 @@ class GIFormatter(Formatter):
             gi_name = symbol.get_extension_attribute('gi-extension', 'type_gi_name')
             if not gi_name:
                 gi_name = symbol.get_extension_attribute('gi-extension', 'gi_name')
+
+            title_format = '%s'
+            freeze_link_title = []
+            if symbol.get_extension_attribute('gi-extension', 'array_nesting'):
+                title_format = "[ %s ]"
+                freeze_link_title = ['title']
+
             if gi_name:
                 fund = FUNDAMENTALS[language].get(gi_name)
                 if fund:
-                    return Formatter._format_type_tokens (
-                        self, symbol, [Link(fund.ref, fund._title, gi_name)])
+                    return super()._format_type_tokens(
+                        symbol, [Link(fund.ref, title_format % fund._title, gi_name,
+                                      frozen_attribs=freeze_link_title)])
 
             new_tokens = []
             for tok in type_tokens:
                 # FIXME : shouldn't we rather QualifiedSymbol.get_type_link() ?
                 if tok not in ['*', 'const ', 'restrict ', 'volatile ']:
-                    new_tokens.append (tok)
+                    if isinstance(tok, Link) and freeze_link_title:
+                        new_tokens.append(Link(tok.ref,
+                                               title_format % tok.title,
+                                               tok.id_,
+                                               frozen_attribs=freeze_link_title))
+                    else:
+                        new_tokens.append (tok)
             return Formatter._format_type_tokens (self, symbol, new_tokens)
 
         return Formatter._format_type_tokens (self, symbol, type_tokens)

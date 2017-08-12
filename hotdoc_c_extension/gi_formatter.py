@@ -45,9 +45,7 @@ class GIFormatter(Formatter):
         language = symbol.get_extension_attribute(self.extension.extension_name, 'language')
         if language != 'c':
 
-            gi_name = symbol.get_extension_attribute('gi-extension', 'type_gi_name')
-            if not gi_name:
-                gi_name = symbol.get_extension_attribute('gi-extension', 'gi_name')
+            gi_name = symbol.get_extension_attribute('gi-extension', 'gi_name')
 
             title_format = '%s'
             freeze_link_title = []

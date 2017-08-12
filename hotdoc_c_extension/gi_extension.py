@@ -1331,7 +1331,7 @@ class GIExtension(Extension):
                 unique_name=name, parent_name=parent_name,
                 aliases=aliases)
             self.__add_symbol_attrs(member, owner_name=struct_name,
-                                    type_gi_name=type_gi_name)
+                                    gi_name=type_gi_name)
             members.append(member)
         struct_str += '\n};'
 

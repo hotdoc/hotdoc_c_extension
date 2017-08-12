@@ -127,7 +127,7 @@ def _create_python_fundamentals():
             "guint16": integer_link,
             "gint32": integer_link,
             "guint32": integer_link,
-            "gchar": string_link,
+            "gchar": integer_link,
             "guchar": integer_link,
             "gshort": integer_link,
             "gushort": integer_link,

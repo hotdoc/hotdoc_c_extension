@@ -47,7 +47,7 @@ class GIFormatter(Formatter):
 
             gi_name = symbol.get_extension_attribute('gi-extension', 'type_gi_name')
             if not gi_name:
-                symbol.get_extension_attribute('gi-extension', 'gi_name')
+                gi_name = symbol.get_extension_attribute('gi-extension', 'gi_name')
             if gi_name:
                 fund = FUNDAMENTALS[language].get(gi_name)
                 if fund:

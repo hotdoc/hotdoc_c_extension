@@ -84,7 +84,7 @@ def _create_javascript_fundamentals():
 
 def _create_python_fundamentals():
     string_link = \
-            Link('https://docs.python.org/3/library/functions.html#str',
+            Link('https://docs.python.org/3/library/functions.html#func-str',
                 'str', None)
     boolean_link = \
             Link('https://docs.python.org/3/library/functions.html#bool',
@@ -107,6 +107,9 @@ def _create_python_fundamentals():
     none_link = \
             Link('https://docs.python.org/3/library/constants.html#None',
                     'None', None)
+    list_link = \
+            Link('https://docs.python.org/3/library/functions.html#func-list',
+                 'list', None)
     gtype_link = \
             Link('https://developer.gnome.org/gobject/stable/'
                     'gobject-Type-Information.html#GType',
@@ -135,6 +138,7 @@ def _create_python_fundamentals():
             "guint": integer_link,
             "gfloat": float_link,
             "gdouble": float_link,
+            "GLib.List": list_link,
             "utf8": string_link,
             "gunichar": string_link,
             "filename": string_link,

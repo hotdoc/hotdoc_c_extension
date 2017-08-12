@@ -179,6 +179,7 @@ class DocRepoMonitor(object):
         self.rootpath = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], cwd=os.path.dirname(os.path.abspath(conf_file))).decode().strip("\n")
         self.app.database.comment_added_signal.connect(self.__comment_added)
         self.doc_repo = Project(self.app)
+        self.doc_repo.parse_name_from_config(conf)
         self.doc_repo.parse_config(conf, toplevel=True)
         self.doc_repo.setup()
         for name, page in list(self.doc_repo.tree.get_pages().items()):
@@ -458,7 +459,8 @@ class DocRepoMonitor(object):
                 print(c.raw_comment)
 
     def __comment_added(self, doc_db, comment):
-        self.comments.append(comment)
+        if comment.filename and comment.lineno:
+            self.comments.append(comment)
 
 def db_to_md (content):
     with open ("tmpfile", 'w') as f:

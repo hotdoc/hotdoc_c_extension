@@ -218,13 +218,6 @@ class GIExtension(Extension):
     def _get_all_sources(self):
         return [s for s in self.c_sources if s.endswith('.h')]
 
-    def __find_package_root(self):
-        if self.__package_root:
-            return
-
-        commonprefix = os.path.commonprefix(list(self._get_all_sources()))
-        self.__package_root = os.path.dirname(commonprefix)
-
     def setup (self):
         commonprefix = os.path.commonprefix(list(self._get_all_sources()))
         self.__default_page = os.path.join(os.path.dirname(commonprefix),

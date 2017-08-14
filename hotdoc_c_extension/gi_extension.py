@@ -28,6 +28,7 @@ import pathlib
 
 from lxml import etree
 from collections import defaultdict
+from collections import namedtuple
 
 from hotdoc.core.symbols import *
 from hotdoc.core.extension import Extension, ExtDependency
@@ -40,6 +41,7 @@ from hotdoc.utils.loggable import warn, Logger
 from hotdoc.utils.utils import OrderedSet
 
 from .gi_formatter import GIFormatter
+from .gi_symbols import *
 from .gi_annotation_parser import GIAnnotationParser
 from .fundamentals import FUNDAMENTALS
 
@@ -51,6 +53,12 @@ Logger.register_warning_code('missing-gir-include', BadInclusionException,
                              'gi-extension')
 Logger.register_warning_code('no-location-indication', InvalidOutputException,
                              'gi-extension')
+
+# Describes the type of Return or Parameter symbols
+SymbolTypeDesc = namedtuple('SymbolTypeDesc', [
+    'type_tokens', 'gi_name', 'c_name', 'nesting_depth',
+    'langs_tokens'
+])
 
 class Flag (object):
     def __init__ (self, nick, link):
@@ -390,7 +398,7 @@ class GIExtension(Extension):
 
         return_type = self.__get_return_type_from_callback(node)
         if return_type:
-            tokens = self.__type_tokens_from_cdecl (return_type)
+            tokens = self.__type_tokens_from_cdecl(return_type)
             return_value = [ReturnItemSymbol(type_tokens=tokens)]
         else:
             return_value = [ReturnItemSymbol(type_tokens=[])]
@@ -721,7 +729,7 @@ class GIExtension(Extension):
     def __formatting_symbol(self, formatter, symbol, language):
         symbol.add_extension_attribute(self.extension_name, 'language', language)
 
-        if type(symbol) in [ReturnItemSymbol, ParameterSymbol]:
+        if type(symbol) in [GIReturnItemSymbol, GIParameterSymbol]:
             self.__add_annotations (formatter, symbol)
 
         if isinstance (symbol, QualifiedSymbol):
@@ -842,25 +850,21 @@ class GIExtension(Extension):
 
     def __unnest_type (self, parameter):
         array_nesting = 0
-        array = parameter.find('{http://www.gtk.org/introspection/core/1.0}array')
-        glist = None
+        container_type = array = parameter.find(core_ns('array'))
         if array is None:
             array = parameter.find(core_ns('type[@name="GLib.List"]'))
-            glist = parameter
+            container_type = array
 
         while array is not None:
             array_nesting += 1
             parameter = array
-            array = parameter.find('{http://www.gtk.org/introspection/core/1.0}array')
+            array = parameter.find(core_ns('array'))
             if array is None:
                 array = parameter.find(core_ns('type[@name="GLib.List"]'))
 
-        if glist is not None:
-            parameter = glist
+        return container_type, parameter, array_nesting
 
-        return parameter, array_nesting
-
-    def __type_tokens_from_cdecl (self, cdecl):
+    def __type_tokens_from_cdecl(self, cdecl):
         indirection = cdecl.count ('*')
         qualified_type = cdecl.strip ('*')
         tokens = []
@@ -917,68 +921,83 @@ class GIExtension(Extension):
         return symbol.extension_attributes.get(self.extension_name, {}).get(
             attrname, None)
 
-    def __type_tokens_and_gi_name_from_gi_node (self, gi_node):
-        type_, array_nesting = self.__unnest_type (gi_node)
+    def __type_description_from_node(self, gi_node):
+        container_type, type_, array_nesting = self.__unnest_type (gi_node)
 
         varargs = type_.find('{http://www.gtk.org/introspection/core/1.0}varargs')
         if varargs is not None:
             ctype_name = '...'
-            ptype_name = 'valist'
+            gi_name = 'valist'
         else:
             ptype_ = type_.find('{http://www.gtk.org/introspection/core/1.0}type')
-            ctype_name = ptype_.attrib.get('{http://www.gtk.org/introspection/c/1.0}type')
-            ptype_name = ptype_.attrib.get('name')
-
-        # gchar ** is being typed to utf8* by GI, special case it.
-        if array_nesting == 1 and type_.attrib.get(c_ns('type')) == 'gchar**':
-            ctype_name = 'gchar**'
+            if container_type is not None:
+                ctype_name = container_type.attrib.get(c_ns('type'))
+            else:
+                ctype_name = ptype_.attrib.get(c_ns('type'))
+            gi_name = ptype_.attrib.get('name')
 
         cur_ns = self.__get_namespace(gi_node)
+        translated_tokens = None
+        if array_nesting > 0:
+            translated_tokens = ['['] + self.__type_tokens_from_gitype (cur_ns, gi_name) + [']']
+            if array_nesting == 1 and type_.attrib.get(c_ns('type')) == 'gchar**':
+                # gchar ** is being typed to utf8* by GI, special case it.
+                ctype_name = 'gchar**'
 
         if ctype_name is not None:
             type_tokens = self.__type_tokens_from_cdecl (ctype_name)
-        elif ptype_name is not None:
-            type_tokens = self.__type_tokens_from_gitype (cur_ns, ptype_name)
+        elif gi_name is not None:
+            type_tokens = self.__type_tokens_from_gitype (cur_ns, gi_name)
         else:
             type_tokens = []
 
-        namespaced = '%s.%s' % (cur_ns, ptype_name)
+        namespaced = '%s.%s' % (cur_ns, gi_name)
         if namespaced in self.__class_nodes:
-            ptype_name = namespaced
+            gi_name = namespaced
 
-        return type_tokens, ptype_name, ctype_name, array_nesting
+        return SymbolTypeDesc(type_tokens, gi_name, ctype_name, array_nesting,
+                              {'python': translated_tokens,
+                              'javascript': translated_tokens})
 
     def __create_parameter_symbol (self, gi_parameter, owner_name):
         param_name = gi_parameter.attrib['name']
 
-        type_tokens, gi_name, ctype_name, array_nesting = self.__type_tokens_and_gi_name_from_gi_node (gi_parameter)
-
+        type_desc = self.__type_description_from_node(gi_parameter)
         direction = gi_parameter.attrib.get('direction')
         if direction is None:
             direction = 'in'
 
-        res = ParameterSymbol(argname=param_name, type_tokens=type_tokens)
-        self.__add_symbol_attrs(res, gi_name=gi_name, owner_name=owner_name,
-                                direction=direction, array_nesting=array_nesting)
+        res = GISymbolIface.from_tokens(GIParameterSymbol,
+                                        argname=param_name,
+                                        c_tokens=type_desc.type_tokens,
+                                        langs_tokens=type_desc.langs_tokens)
+        self.__add_symbol_attrs(res, gi_name=type_desc.gi_name, owner_name=owner_name,
+                                direction=direction)
 
         return res, direction
 
     def __create_return_value_symbol (self, gi_retval, out_parameters, owner_name):
-        type_tokens, gi_name, ctype_name, array_nesting = self.__type_tokens_and_gi_name_from_gi_node(gi_retval)
+        type_desc = self.__type_description_from_node(gi_retval)
 
-        if gi_name == 'none':
+        if type_desc.gi_name == 'none':
             ret_item = None
         else:
-            ret_item = ReturnItemSymbol (type_tokens=type_tokens)
-            self.__add_symbol_attrs(ret_item, gi_name=gi_name,
-                                    owner_name=owner_name,
-                                    array_nesting=array_nesting)
+            ret_item = GISymbolIface.from_tokens(
+                GIReturnItemSymbol, c_tokens=type_desc.type_tokens,
+                langs_tokens=type_desc.langs_tokens)
+
+            self.__add_symbol_attrs(ret_item, gi_name=type_desc.gi_name,
+                                    owner_name=owner_name)
 
         res = [ret_item]
 
         for out_param in out_parameters:
-            ret_item = ReturnItemSymbol (type_tokens=out_param.input_tokens,
-                    name=out_param.argname)
+            ret_item = GISymbolIface.from_tokens(
+                GIReturnItemSymbol,
+                c_tokens=out_param.input_tokens,
+                name=out_param.argname,
+                langs_tokens=out_param.get_lang_tokens())
+
             self.__add_symbol_attrs(ret_item, owner_name=owner_name)
             res.append(ret_item)
 
@@ -1089,10 +1108,11 @@ class GIExtension(Extension):
     def __create_property_symbol (self, node, parent_name):
         unique_name, name, klass_name = self.__get_symbol_names(node)
 
-        type_tokens, gi_name, ctype_name, array_nesting = self.__type_tokens_and_gi_name_from_gi_node(node)
-        type_ = QualifiedSymbol (type_tokens=type_tokens)
-        self.__add_symbol_attrs(type_, gi_name=gi_name, owner_name=unique_name,
-                                array_nesting=array_nesting)
+        type_desc = self.__type_description_from_node(node)
+        type_ = QualifiedSymbol(type_tokens=type_desc.type_tokens)
+        self.__add_symbol_attrs(type_, gi_name=type_desc.gi_name,
+                                owner_name=unique_name,
+                                type_desc=type_desc)
 
         flags = []
         writable = node.attrib.get('writable')
@@ -1164,15 +1184,15 @@ class GIExtension(Extension):
     def __create_alias_symbol (self, node, gi_name, parent_name):
         name = self.__get_symbol_names(node)[0]
 
-        type_tokens, gi_name, ctype_name, array_nesting = self.__type_tokens_and_gi_name_from_gi_node(node)
-        aliased_type = QualifiedSymbol(type_tokens=type_tokens)
+        type_desc = self.__type_description_from_node(node)
+        aliased_type = QualifiedSymbol(type_tokens=type_desc.type_tokens)
         self.__add_symbol_attrs(aliased_type, owner_name=name,
-                                array_nesting=array_nesting)
+                                type_desc=type_desc)
         filename = self.__get_symbol_filename(name)
 
-        alias_link = [l for l in type_tokens if isinstance(l, Link)]
+        alias_link = [l for l in type_desc.type_tokens if isinstance(l, Link)]
         for lang in ('python', 'javascript'):
-            fund_type = FUNDAMENTALS[lang].get(ctype_name)
+            fund_type = FUNDAMENTALS[lang].get(type_desc.c_name)
             if fund_type:
                 # The alias name is now conciderd as a FUNDAMENTAL type.
                 FUNDAMENTALS[lang][name] = fund_type
@@ -1325,9 +1345,9 @@ class GIExtension(Extension):
                 if parameters_nodes is not None:
                     for j, gi_parameter in enumerate(parameters_nodes):
                         param_name = gi_parameter.attrib['name']
-                        type_tokens, gi_name, ctype_name, array_nesting = \
-                            self.__type_tokens_and_gi_name_from_gi_node(gi_parameter)
-                        struct_str += "%s%s %s" % (', ' if j else '', ctype_name, param_name)
+                        type_desc = self.__type_description_from_node(gi_parameter)
+                        struct_str += "%s%s %s" % (', ' if j else '', type_desc.c_name,
+                                                   param_name)
                 struct_str += ");"
 
                 # Weed out vmethods, handled separately

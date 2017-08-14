@@ -21,6 +21,21 @@ from hotdoc.core.formatter import Formatter
 from hotdoc.core.symbols import *
 import lxml.etree
 from .fundamentals import FUNDAMENTALS
+from .gi_symbols import *
+
+
+def sformatter(func):
+    def func_wrapper(self, symbol, *args, **kwargs):
+        if not symbol:
+            return func(self, symbol, *args, **kwargs)
+
+        if isinstance(symbol, GISymbolIface):
+            language = symbol.get_extension_attribute(self.extension.extension_name, 'language')
+            symbol = symbol.get(language)
+
+        return func(self, symbol, *args, **kwargs)
+
+    return func_wrapper
 
 
 class GIFormatter(Formatter):
@@ -31,6 +46,12 @@ class GIFormatter(Formatter):
         searchpath = [os.path.join(module_path, "templates")]
         Formatter.__init__(self, gi_extension, searchpath)
         self._order_by_parent = True
+        self._symbol_formatters[GIParameterSymbol] = self._format_parameter_symbol
+        self._symbol_formatters[GIReturnItemSymbol] = self._format_return_item_symbol
+
+    @sformatter
+    def format_symbol(self, symbol, link_resolver):
+        return super().format_symbol(symbol, link_resolver)
 
     def format_annotations (self, annotations):
         template = self.engine.get_template('gi_annotations.html')
@@ -41,40 +62,30 @@ class GIFormatter(Formatter):
         out = template.render ({'flags': flags})
         return out
 
+    @sformatter
     def _format_type_tokens(self, symbol, type_tokens):
         language = symbol.get_extension_attribute(self.extension.extension_name, 'language')
         if language != 'c':
-
-            gi_name = symbol.get_extension_attribute('gi-extension', 'gi_name')
-
-            title_format = '%s'
-            freeze_link_title = []
-            if symbol.get_extension_attribute('gi-extension', 'array_nesting'):
-                title_format = "[ %s ]"
-                freeze_link_title = ['title']
-
-            if gi_name:
-                fund = FUNDAMENTALS[language].get(gi_name)
-                if fund:
-                    return super()._format_type_tokens(
-                        symbol, [Link(fund.ref, title_format % fund._title, gi_name,
-                                      frozen_attribs=freeze_link_title)])
-
             new_tokens = []
             for tok in type_tokens:
                 # FIXME : shouldn't we rather QualifiedSymbol.get_type_link() ?
                 if tok not in ['*', 'const ', 'restrict ', 'volatile ']:
-                    if isinstance(tok, Link) and freeze_link_title:
-                        new_tokens.append(Link(tok.ref,
-                                               title_format % tok.title,
-                                               tok.id_,
-                                               frozen_attribs=freeze_link_title))
+                    if isinstance(tok, Link):
+                        tname = tok.id_
                     else:
-                        new_tokens.append (tok)
+                        tname = tok
+
+                    fund = FUNDAMENTALS[language].get(tname)
+                    if fund:
+                        new_tokens.append(Link(fund.ref, fund._title, tname))
+                    else:
+                        new_tokens.append(tok)
+
             return Formatter._format_type_tokens (self, symbol, new_tokens)
 
         return Formatter._format_type_tokens (self, symbol, type_tokens)
 
+    @sformatter
     def _format_return_value_symbol (self, *args):
         retval = args[0]
         is_void = retval[0] is None or \
@@ -120,6 +131,7 @@ class GIFormatter(Formatter):
         res = Formatter._format_parameter_symbol (self, parameter)
         return res
 
+    @sformatter
     def _format_linked_symbol (self, symbol):
         if not symbol:
             return Formatter._format_linked_symbol (self, symbol)
@@ -175,6 +187,7 @@ class GIFormatter(Formatter):
 
         return res
 
+    @sformatter
     def _format_vfunction_symbol (self, vmethod):
         title = vmethod.link.title
         language = vmethod.get_extension_attribute(self.extension.extension_name, 'language')
@@ -186,6 +199,7 @@ class GIFormatter(Formatter):
             title = 'vfunc_%s' % title
         return Formatter._format_vfunction_symbol (self, vmethod)
 
+    @sformatter
     def _format_members_list (self, members, member_designation, struct):
         language = struct.get_extension_attribute(self.extension.extension_name, 'language')
         if language != 'c':
@@ -195,6 +209,7 @@ class GIFormatter(Formatter):
 
         return super()._format_members_list (members, member_designation, struct)
 
+    @sformatter
     def _format_struct (self, struct):
         language = struct.get_extension_attribute(self.extension.extension_name, 'language')
         if language == 'c':
@@ -207,6 +222,7 @@ class GIFormatter(Formatter):
                                 "members_list": members_list})
         return (out, False)
 
+    @sformatter
     def _format_class_symbol (self, klass):
         saved_raw_text = klass.raw_text
         if klass.get_extension_attribute(self.extension.extension_name, 'language') != 'c':
@@ -224,6 +240,7 @@ class GIFormatter(Formatter):
         klass.raw_text = saved_raw_text
         return out
 
+    @sformatter
     def _format_constant(self, constant):
         language = constant.get_extension_attribute(self.extension.extension_name, 'language')
         if language == 'c':
@@ -235,6 +252,7 @@ class GIFormatter(Formatter):
                                 'constant': constant})
         return (out, False)
 
+    @sformatter
     def _format_comment(self, comment, link_resolver):
         ast = comment.extension_attrs['gi-extension']['ast']
 
@@ -252,6 +270,7 @@ class GIFormatter(Formatter):
 
         return out
 
+    @sformatter
     def _format_callable(self, callable_, callable_type, title,
                          is_pointer=False):
         language = callable_.get_extension_attribute(self.extension.extension_name, 'language')
@@ -260,6 +279,7 @@ class GIFormatter(Formatter):
 
         return super()._format_callable(callable_, callable_type, title, is_pointer)
 
+    @sformatter
     def _format_property_symbol(self, prop):
         language = prop.get_extension_attribute(self.extension.extension_name, 'language')
         if language == 'python':
@@ -268,6 +288,7 @@ class GIFormatter(Formatter):
         return super()._format_property_symbol(prop)
 
 
+    @sformatter
     def _format_alias(self, alias):
         language = alias.get_extension_attribute(self.extension.extension_name, 'language')
         if language == 'c':

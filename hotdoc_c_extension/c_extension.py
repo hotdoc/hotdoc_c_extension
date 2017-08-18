@@ -79,6 +79,8 @@ def get_clang_headers():
 
     warn('clang-headers-not-found', CLANG_HEADERS_WARNING)
 
+CLANG_HEADERS = get_clang_headers()
+
 def get_clang_libdir():
     return subprocess.check_output(['llvm-config', '--libdir']).strip().decode()
 
@@ -111,7 +113,7 @@ class ClangScanner(object):
 
         # FIXME: er maybe don't do that ?
         args = ["-Wno-attributes"]
-        args.append ("-isystem%s" % get_clang_headers())
+        args.append ("-isystem%s" % CLANG_HEADERS)
         args.extend (options)
         self.symbols = {}
         self.parsed = set({})

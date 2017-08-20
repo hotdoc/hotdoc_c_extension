@@ -135,22 +135,52 @@ def c_ns(tag):
     return '{http://www.gtk.org/introspection/c/1.0}%s' % tag
 
 
-def unnest_type (parameter):
+def unnest_type (node):
     array_nesting = 0
-    container_type = array = parameter.find(core_ns('array'))
-    if array is None:
-        array = parameter.find(core_ns('type[@name="GLib.List"]'))
-        container_type = array
 
-    while array is not None:
+    varargs = node.find(core_ns ('varargs'))
+    if varargs is not None:
+        return '...', 'valist', 0
+
+    type_ = node.find(core_ns('array'))
+    if type_ is None:
+        type_ = node.find(core_ns('type'))
+    ctype_name = type_.attrib.get(c_ns('type'), 'void*')
+
+    while type_.tag == core_ns('array') or type_.attrib.get('name') == 'GLib.List':
+        subtype_ = type_.find(core_ns('array'))
+        if subtype_ is None:
+            subtype_ = type_.find(core_ns('type'))
+        type_ = subtype_
         array_nesting += 1
-        parameter = array
-        array = parameter.find(core_ns('array'))
-        if array is None:
-            array = parameter.find(core_ns('type[@name="GLib.List"]'))
 
-    return container_type, parameter, array_nesting
+    return ctype_name, type_.attrib.get('name', 'object'), array_nesting
 
+
+def get_namespace(node):
+    parent = node.getparent()
+    nstag = '{%s}namespace' % NS_MAP['core']
+    while parent is not None and parent.tag != nstag:
+        parent = parent.getparent()
+
+    return parent.attrib['name']
+
+
+def type_tokens_from_cdecl(cdecl):
+    indirection = cdecl.count ('*')
+    qualified_type = cdecl.strip ('*')
+    tokens = []
+    for token in qualified_type.split ():
+        if token in ["const", "restrict", "volatile"]:
+            tokens.append(token + ' ')
+        else:
+            link = Link(None, token, token)
+            tokens.append (link)
+
+    for i in range(indirection):
+        tokens.append ('*')
+
+    return tokens
 
 DEFAULT_PAGE = "Miscellaneous.default_page"
 DEFAULT_PAGE_COMMENT = """/**
@@ -165,6 +195,9 @@ DEFAULT_PAGE_COMMENT = """/**
 
 OUTPUT_LANGUAGES = ['c', 'python', 'javascript']
 
+NS_MAP = {'core': 'http://www.gtk.org/introspection/core/1.0',
+          'c': 'http://www.gtk.org/introspection/c/1.0',
+          'glib': 'http://www.gtk.org/introspection/glib/1.0'}
 
 class GIExtension(Extension):
     extension_name = "gi-extension"
@@ -187,10 +220,6 @@ class GIExtension(Extension):
         Extension.__init__(self, app, project)
 
         self.languages = None
-
-        self.__nsmap = {'core': 'http://www.gtk.org/introspection/core/1.0',
-                      'c': 'http://www.gtk.org/introspection/c/1.0',
-                      'glib': 'http://www.gtk.org/introspection/glib/1.0'}
 
         self.__smart_filters = set()
 
@@ -228,7 +257,7 @@ class GIExtension(Extension):
             self.languages = OUTPUT_LANGUAGES
         for gir_file in self.sources:
             gir_root = etree.parse(gir_file).getroot()
-            self.__cache_nodes(gir_root)
+            self.__cache_nodes(gir_root, self.__node_cache)
         self.__create_hierarchies()
 
     def _make_formatter(self):
@@ -311,7 +340,7 @@ class GIExtension(Extension):
             self.__scan_node(root)
 
     def __core_ns(self, tag):
-        return '{%s}%s' % tag, self.__nsmap['core']
+        return '{%s}%s' % tag, NS_MAP['core']
 
     def __get_structure_name(self, node):
         return node.attrib[c_ns('type')]
@@ -331,7 +360,7 @@ class GIExtension(Extension):
             ns = klass_node.getparent()
             klass_structure_node = ns.xpath(
                 './*[@glib:is-gtype-struct-for="%s"]' % klass_node.attrib['name'],
-                namespaces=self._GIExtension__nsmap)[0]
+                namespaces=NS_MAP)[0]
             parent_name = self.__get_structure_name(klass_structure_node)
             name = node.attrib['name']
             unique_name = '%s::%s' % (parent_name, name)
@@ -412,7 +441,7 @@ class GIExtension(Extension):
 
         return_type = self.__get_return_type_from_callback(node)
         if return_type:
-            tokens = self.__type_tokens_from_cdecl(return_type)
+            tokens = type_tokens_from_cdecl(return_type)
             return_value = [ReturnItemSymbol(type_tokens=tokens)]
         else:
             return_value = [ReturnItemSymbol(type_tokens=[])]
@@ -513,7 +542,7 @@ class GIExtension(Extension):
         return None
 
     def __generate_smart_filters(self, id_prefixes, sym_prefixes, node):
-        sym_prefix = node.attrib['{%s}symbol-prefix' % self.__nsmap['c']]
+        sym_prefix = node.attrib['{%s}symbol-prefix' % NS_MAP['c']]
         self.__smart_filters.add(('%s_IS_%s' % (sym_prefixes, sym_prefix)).upper())
         self.__smart_filters.add(('%s_TYPE_%s' % (sym_prefixes, sym_prefix)).upper())
         self.__smart_filters.add(('%s_%s' % (sym_prefixes, sym_prefix)).upper())
@@ -522,53 +551,53 @@ class GIExtension(Extension):
         self.__smart_filters.add(('%s_%s_GET_CLASS' % (sym_prefixes, sym_prefix)).upper())
         self.__smart_filters.add(('%s_%s_GET_IFACE' % (sym_prefixes, sym_prefix)).upper())
 
-    def __cache_nodes(self, gir_root):
-        ns_node = gir_root.find('./{%s}namespace' % self.__nsmap['core'])
-        id_prefixes = ns_node.attrib['{%s}identifier-prefixes' % self.__nsmap['c']]
-        sym_prefixes = ns_node.attrib['{%s}symbol-prefixes' % self.__nsmap['c']]
+    def __cache_nodes(self, gir_root, node_cache):
+        ns_node = gir_root.find('./{%s}namespace' % NS_MAP['core'])
+        id_prefixes = ns_node.attrib['{%s}identifier-prefixes' % NS_MAP['c']]
+        sym_prefixes = ns_node.attrib['{%s}symbol-prefixes' % NS_MAP['c']]
 
-        id_key = '{%s}identifier' % self.__nsmap['c']
+        id_key = '{%s}identifier' % NS_MAP['c']
         for node in gir_root.xpath(
                 './/*[@c:identifier]',
-                namespaces=self.__nsmap):
-            self.__node_cache[node.attrib[id_key]] = node
+                namespaces=NS_MAP):
+            node_cache[node.attrib[id_key]] = node
 
-        id_type = '{%s}type' % self.__nsmap['c']
-        class_tag = '{%s}class' % self.__nsmap['core']
-        interface_tag = '{%s}interface' % self.__nsmap['core']
+        id_type = '{%s}type' % NS_MAP['c']
+        class_tag = '{%s}class' % NS_MAP['core']
+        interface_tag = '{%s}interface' % NS_MAP['core']
         for node in gir_root.xpath(
                 './/*[not(self::core:type) and not (self::core:array)][@c:type]',
-                namespaces=self.__nsmap):
+                namespaces=NS_MAP):
             name = node.attrib[id_type]
-            self.__node_cache[name] = node
+            node_cache[name] = node
             if node.tag in [class_tag, interface_tag]:
                 gi_name = '.'.join(self.__get_gi_name_components(node))
                 self.__class_nodes[gi_name] = node
-                self.__node_cache['%s::%s' % (name, name)] = node
+                node_cache['%s::%s' % (name, name)] = node
                 self.__generate_smart_filters(id_prefixes, sym_prefixes, node)
 
         for node in gir_root.xpath(
                 './/core:property',
-                namespaces=self.__nsmap):
+                namespaces=NS_MAP):
             name = '%s:%s' % (self.__get_klass_name(node.getparent()),
                               node.attrib['name'])
-            self.__node_cache[name] = node
+            node_cache[name] = node
 
         for node in gir_root.xpath(
                 './/glib:signal',
-                namespaces=self.__nsmap):
+                namespaces=NS_MAP):
             name = '%s::%s' % (self.__get_klass_name(node.getparent()),
                                node.attrib['name'])
-            self.__node_cache[name] = node
+            node_cache[name] = node
 
         for node in gir_root.xpath(
                 './/core:virtual-method',
-                namespaces=self.__nsmap):
+                namespaces=NS_MAP):
             name = self.__get_symbol_names(node)[0]
-            self.__node_cache[name] = node
+            node_cache[name] = node
 
         for inc in gir_root.findall('./core:include',
-                namespaces = self.__nsmap):
+                namespaces = NS_MAP):
             inc_name = inc.attrib["name"]
             inc_version = inc.attrib["version"]
             gir_file = self.__find_gir_file('%s-%s.gir' % (inc_name,
@@ -583,7 +612,7 @@ class GIExtension(Extension):
 
             self.__parsed_girs.add(gir_file)
             inc_gir_root = etree.parse(gir_file).getroot()
-            self.__cache_nodes(inc_gir_root)
+            self.__cache_nodes(inc_gir_root, node_cache)
 
     def __create_hierarchies(self):
         for gi_name, klass in self.__class_nodes.items():
@@ -591,9 +620,9 @@ class GIExtension(Extension):
             self.__gir_hierarchies[gi_name] = hierarchy
 
     def __get_klass_name(self, klass):
-        klass_name = klass.attrib.get('{%s}type' % self.__nsmap['c'])
+        klass_name = klass.attrib.get('{%s}type' % NS_MAP['c'])
         if not klass_name:
-            klass_name = klass.attrib.get('{%s}type-name' % self.__nsmap['glib'])
+            klass_name = klass.attrib.get('{%s}type-name' % NS_MAP['glib'])
         return klass_name
 
     def __create_hierarchy (self, klass):
@@ -862,36 +891,12 @@ class GIExtension(Extension):
 
         return res
 
-    def __type_tokens_from_cdecl(self, cdecl):
-        indirection = cdecl.count ('*')
-        qualified_type = cdecl.strip ('*')
-        tokens = []
-        for token in qualified_type.split ():
-            if token in ["const", "restrict", "volatile"]:
-                tokens.append(token + ' ')
-            else:
-                link = Link(None, token, token)
-                tokens.append (link)
-
-        for i in range(indirection):
-            tokens.append ('*')
-
-        return tokens
-
     def __get_gir_type (self, cur_ns, name):
         namespaced = '%s.%s' % (cur_ns, name)
         klass = self.__class_nodes.get (namespaced)
         if klass is not None:
             return klass
         return self.__class_nodes.get (name)
-
-    def __get_namespace(self, node):
-        parent = node.getparent()
-        nstag = '{%s}namespace' % self.__nsmap['core']
-        while parent is not None and parent.tag != nstag:
-            parent = parent.getparent()
-
-        return parent.attrib['name']
 
     def __type_tokens_from_gitype (self, cur_ns, ptype_name):
         qs = None
@@ -920,28 +925,14 @@ class GIExtension(Extension):
             attrname, None)
 
     def __type_description_from_node(self, gi_node):
-        container_type, type_, array_nesting = unnest_type (gi_node)
+        ctype_name, gi_name, array_nesting = unnest_type (gi_node)
 
-        varargs = type_.find('{http://www.gtk.org/introspection/core/1.0}varargs')
-        if varargs is not None:
-            ctype_name = '...'
-            gi_name = 'valist'
-        else:
-            ptype_ = type_.find('{http://www.gtk.org/introspection/core/1.0}type')
-            if container_type is not None:
-                ctype_name = container_type.attrib.get(c_ns('type'))
-            else:
-                ctype_name = ptype_.attrib.get(c_ns('type'))
-            gi_name = ptype_.attrib.get('name')
-
-        cur_ns = self.__get_namespace(gi_node)
+        cur_ns = get_namespace(gi_node)
 
         if ctype_name is not None:
-            type_tokens = self.__type_tokens_from_cdecl (ctype_name)
-        elif gi_name is not None:
-            type_tokens = self.__type_tokens_from_gitype (cur_ns, gi_name)
+            type_tokens = type_tokens_from_cdecl (ctype_name)
         else:
-            type_tokens = []
+            type_tokens = self.__type_tokens_from_gitype (cur_ns, gi_name)
 
         namespaced = '%s.%s' % (cur_ns, gi_name)
         if namespaced in self.__class_nodes:
@@ -1349,7 +1340,7 @@ class GIExtension(Extension):
             name = "%s.%s" % (concatenated_name or struct_name, field_name)
             aliases = ["%s::%s" % (struct_name, field_name)]
 
-            tokens = self.__type_tokens_from_cdecl (type_)
+            tokens = type_tokens_from_cdecl (type_)
             qtype = QualifiedSymbol(type_tokens=tokens)
 
             self.__add_symbol_attrs(qtype, owner_name=struct_name)
@@ -1409,8 +1400,8 @@ class GIExtension(Extension):
         return components
 
     def __add_translations(self, unique_name, node):
-        id_key = '{%s}identifier' % self.__nsmap['c']
-        id_type = '{%s}type' % self.__nsmap['c']
+        id_key = '{%s}identifier' % NS_MAP['c']
+        id_type = '{%s}type' % NS_MAP['c']
 
         components = self.__get_gi_name_components(node)
         gi_name = '.'.join(components)
@@ -1428,7 +1419,7 @@ class GIExtension(Extension):
         return components, gi_name
 
     def __get_function_name(self, func):
-        return func.attrib.get('{%s}identifier' % self.__nsmap['c'])
+        return func.attrib.get('{%s}identifier' % NS_MAP['c'])
 
     def __create_function_symbol (self, node, parent_name):
         name = self.__get_symbol_names(node)[0]

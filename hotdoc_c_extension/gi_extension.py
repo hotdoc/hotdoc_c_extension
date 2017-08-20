@@ -46,7 +46,10 @@ from .utils.utils import CCommentExtractor
 
 from hotdoc_c_extension.gi_flags import *
 from hotdoc_c_extension.gi_utils import *
-from hotdoc_c_extension.gi_node_cache import *
+from hotdoc_c_extension.gi_node_cache import (
+        SMART_FILTERS, make_translations, get_translation, get_klass_parents,
+        get_klass_children, cache_nodes, type_description_from_node,
+        is_introspectable)
 from hotdoc_c_extension.gi_gtkdoc_links import GTKDOC_HREFS
 
 
@@ -210,9 +213,9 @@ class GIExtension(Extension):
         res = super(GIExtension, self).get_or_create_symbol(*args, **kwargs)
 
         if node is not None and res:
-            translate(res.unique_name, node)
+            make_translations(res.unique_name, node)
             for alias in aliases:
-                translate(alias, node)
+                make_translations(alias, node)
 
         return res
 
@@ -257,30 +260,21 @@ class GIExtension(Extension):
         return self.__default_page
 
     def __get_structure_members(self, node, filename, struct_name, parent_name,
-                                is_union=False, indent=4 * ' ',
-                                concatenated_name=None, in_union=False):
-        if is_union:
-            sname = ''
-        else:
-            sname = struct_name + ' ' if struct_name is not None else ''
-
-        struct_str = "%s%s{" % ('union ' if is_union else 'struct ', sname)
+                                field_name_prefix=None, in_union=False):
         members = []
         for field in node.getchildren():
             if field.tag in [core_ns('record'), core_ns('union')]:
-                if not concatenated_name:
-                    concatenated_name = parent_name
-
-                if struct_name and struct_name != parent_name:
-                    concatenated_name += '.' + struct_name
+                if field_name_prefix is None and struct_name != parent_name:
+                    field_name_prefix = struct_name
+                elif struct_name != parent_name:
+                    field_name_prefix = '%s.%s' % (field_name_prefix, struct_name)
 
                 new_union = field.tag == core_ns('union')
-                union_members, union_str = self.__get_structure_members(
+                union_members = self.__get_structure_members(
                     field, filename, field.attrib.get('name', None),
-                    parent_name, indent=indent + 4 * ' ',
-                    is_union=new_union, concatenated_name=concatenated_name,
+                    parent_name,
+                    field_name_prefix=field_name_prefix,
                     in_union=in_union or new_union)
-                struct_str += "\n%s%s" % (indent, union_str)
                 members += union_members
                 continue
             elif field.tag != core_ns('field'):
@@ -295,54 +289,30 @@ class GIExtension(Extension):
 
             type_gi_name = None
             if children[0].tag == core_ns('callback'):
-                field_name = field.attrib['name'] + '()'
-                type_ = get_return_type_from_callback(children[-1])
-
-                struct_str += "\n%s%s %s (" % (indent, type_, field_name[:-2])
-                parameters_nodes = children[0].find(core_ns('parameters'))
-                if parameters_nodes is not None:
-                    for j, gi_parameter in enumerate(parameters_nodes):
-                        param_name = gi_parameter.attrib['name']
-                        type_desc = type_description_from_node(gi_parameter)
-                        struct_str += "%s%s %s" % (', ' if j else '', type_desc.c_name,
-                                                   param_name)
-                struct_str += ");"
-
-                # Weed out vmethods, handled separately
                 continue
-            else:
-                field_name = field.attrib['name']
-                array_type = get_array_type(field)
-                if array_type:
-                    type_ = array_type
-                else:
-                    type_node = field.find(core_ns('type'))
-                    type_ = type_node.attrib[c_ns('type')]
-                    type_gi_name = type_node.attrib.get('name')
-                struct_str += "\n%s%s %s;" % (indent, type_, field_name)
 
+            field_name = field.attrib['name']
 
-            name = "%s.%s" % (concatenated_name or struct_name, field_name)
-            aliases = ["%s::%s" % (struct_name, field_name)]
+            if field_name_prefix:
+                field_name = '%s.%s' % (field_name_prefix, field_name)
 
-            tokens = type_tokens_from_cdecl (type_)
-            qtype = QualifiedSymbol(type_tokens=tokens)
+            name = "%s.%s" % (parent_name, field_name)
+
+            if field_name_prefix:
+                print (field_name, name)
+
+            type_desc = type_description_from_node(field)
+            qtype = QualifiedSymbol(type_tokens=type_desc.type_tokens)
 
             member = self.get_or_create_symbol(
-                FieldSymbol, field,
+                FieldSymbol,
                 member_name=field_name, qtype=qtype,
                 filename=filename, display_name=name,
-                unique_name=name, parent_name=parent_name,
-                aliases=aliases)
-            self.add_attrs(member, gi_name=type_gi_name, in_union=in_union)
+                unique_name=name, parent_name=parent_name)
+            self.add_attrs(member, gi_name=type_desc.gi_name, in_union=in_union)
             members.append(member)
 
-        if is_union and struct_name:
-            struct_str += '\n%s} %s;' % (indent[3:], struct_name)
-        else:
-            struct_str += '\n%s};' % indent[3:]
-
-        return members, struct_str
+        return members
 
     def __find_structure_pagename(self, node, unique_name, is_class):
         filename = self.__get_symbol_filename(unique_name)
@@ -596,6 +566,7 @@ class GIExtension(Extension):
 
         unique_name, name, klass_name = get_symbol_names(node)
 
+        # Virtual methods are documented in the class comment
         if klass_comment:
             param_comment = klass_comment.params.get(name)
             if (param_comment):
@@ -699,10 +670,10 @@ class GIExtension(Extension):
 
     def __create_class_symbol (self, node, gi_name, klass_name,
                                unique_name, filename):
-        hierarchy = get_parents_hierarchy(gi_name)
-        children = get_children(gi_name)
+        hierarchy = get_klass_parents(gi_name)
+        children = get_klass_children(gi_name)
 
-        members, raw_text = self.__get_structure_members(node, filename,
+        members = self.__get_structure_members(node, filename,
                                                          klass_name,
                                                          unique_name)
 
@@ -712,7 +683,6 @@ class GIExtension(Extension):
                                         display_name=klass_name,
                                         unique_name=unique_name,
                                         filename=filename,
-                                        raw_text=raw_text,
                                         members=members,
                                         parent_name=unique_name)
 
@@ -721,7 +691,7 @@ class GIExtension(Extension):
     def __create_struct_symbol(self, node, struct_name, filename,
                                parent_name):
 
-        members, raw_text = self.__get_structure_members(
+        members = self.__get_structure_members(
             node, filename, struct_name,
             parent_name=struct_name)
 
@@ -731,8 +701,7 @@ class GIExtension(Extension):
                                   anonymous=False,
                                   filename=filename,
                                   members=members,
-                                  parent_name=parent_name,
-                                  raw_text=raw_text)
+                                  parent_name=parent_name)
 
     def __create_interface_symbol (self, node, unique_name, filename):
         return self.get_or_create_symbol(InterfaceSymbol, node,
@@ -881,7 +850,7 @@ class GIExtension(Extension):
         if aliased_link:
             return self.__translate_link_title(aliased_link, language)
 
-        translated = TRANSLATED_NAMES[language].get(link.id_)
+        translated = get_translation(link.id_, language)
         if translated:
             return translated
 

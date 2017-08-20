@@ -272,10 +272,10 @@ class GIExtension(Extension):
         members = []
         for field in node.getchildren():
             if field.tag in [core_ns('record'), core_ns('union')]:
-                if field_name_prefix is None and struct_name != parent_name:
-                    field_name_prefix = struct_name
-                elif struct_name != parent_name:
-                    field_name_prefix = '%s.%s' % (field_name_prefix, struct_name)
+                if field_name_prefix is None:
+                    field_name_prefix = field.attrib['name']
+                else:
+                    field_name_prefix = '%s.%s' % (field_name_prefix, field.attrib['name'])
 
                 new_union = field.tag == core_ns('union')
                 union_members = self.__get_structure_members(

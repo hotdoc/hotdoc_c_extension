@@ -21,6 +21,7 @@ from hotdoc.core.formatter import Formatter
 from hotdoc.core.symbols import *
 import lxml.etree
 from .fundamentals import FUNDAMENTALS
+from hotdoc_c_extension.gi_node_cache import ALL_GI_TYPES
 
 
 class GIFormatter(Formatter):
@@ -45,22 +46,25 @@ class GIFormatter(Formatter):
         language = symbol.get_extension_attribute(self.extension.extension_name, 'language')
         if language != 'c':
             type_desc = self.extension.get_attr(symbol, 'type_desc')
-            if type_desc is None:
-                print (symbol, type_tokens)
+            assert(type_desc)
+            gi_name = type_desc.gi_name
             new_tokens = []
-            for tok in type_tokens:
-                # FIXME : shouldn't we rather QualifiedSymbol.get_type_link() ?
-                if tok not in ['*', 'const ', 'restrict ', 'volatile ']:
-                    if isinstance(tok, Link):
-                        tname = tok.id_
-                    else:
-                        tname = tok
+            link = None
+            if gi_name in FUNDAMENTALS[language]:
+                fund_link = FUNDAMENTALS[language][gi_name]
+                link = Link(fund_link.ref, fund_link._title, gi_name)
+            elif gi_name in ALL_GI_TYPES:
+                ctype_name = ALL_GI_TYPES[gi_name]
+                link = self.extension.app.link_resolver.get_named_link(ctype_name)
 
-                    fund = FUNDAMENTALS[language].get(tname)
-                    if fund:
-                        new_tokens.append(Link(fund.ref, fund._title, tname))
-                    else:
-                        new_tokens.append(tok)
+            if type_desc.nesting_depth:
+                new_tokens.append('[' * type_desc.nesting_depth + ' ')
+            if link:
+                new_tokens.append(link)
+            else: # Should not happen but let's be conservative
+                new_tokens.append(type_desc.gi_name)
+            if type_desc.nesting_depth:
+                new_tokens.append(']' * type_desc.nesting_depth)
 
             return Formatter._format_type_tokens (self, symbol, new_tokens)
 
@@ -102,8 +106,6 @@ class GIFormatter(Formatter):
             if direction == 'out':
                 return (None, False)
 
-            gi_name = parameter.get_extension_attribute ('gi-extension', 'gi_name')
-
             parameter.extension_contents['type-link'] = self._format_linked_symbol (parameter)
         else:
             parameter.extension_contents.pop('type-link', None)
@@ -125,8 +127,8 @@ class GIFormatter(Formatter):
         if not isinstance (symbol, QualifiedSymbol):
             return Formatter._format_linked_symbol (self, symbol)
 
-        gi_name = symbol.get_extension_attribute ('gi-extension', 'gi_name')
-        if gi_name:
+        type_desc = symbol.get_extension_attribute ('gi-extension', 'type_desc')
+        if type_desc:
             return self._format_type_tokens (symbol, symbol.type_tokens)
 
         return Formatter._format_linked_symbol (self, symbol)

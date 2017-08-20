@@ -27,7 +27,7 @@ def __generate_smart_filters(id_prefixes, sym_prefixes, node):
 __HIERARCHY_GRAPH = nx.DiGraph()
 
 
-__ALL_GI_TYPES = {}
+ALL_GI_TYPES = {}
 
 
 # Avoid parsing gir files multiple times
@@ -54,6 +54,19 @@ __TRANSLATED_NAMES = {l: {} for l in OUTPUT_LANGUAGES}
 __NON_INTROSPECTABLE_SYMBOLS = set()
 
 
+def get_field_c_name_components(node, components):
+    parent = node.getparent()
+    if parent.tag != core_ns('namespace'):
+        get_field_c_name_components(parent, components)
+    components.append(node.attrib.get(c_ns('type'), node.attrib['name']))
+
+
+def get_field_c_name(node):
+    components = []
+    get_field_c_name_components(node, components)
+    return '.'.join(components)
+
+
 def make_translations(unique_name, node):
     '''
     Compute and store the title that should be displayed
@@ -61,18 +74,27 @@ def make_translations(unique_name, node):
     when linking to test_greeter_greet() we want to display
     Test.Greeter.greet
     '''
-    components = get_gi_name_components(node)
-    gi_name = '.'.join(components)
 
     if c_ns('identifier') in node.attrib:
+        components = get_gi_name_components(node)
+        gi_name = '.'.join(components)
         __TRANSLATED_NAMES['python'][unique_name] = gi_name
         components[-1] = 'prototype.%s' % components[-1]
         __TRANSLATED_NAMES['javascript'][unique_name] = '.'.join(components)
         __TRANSLATED_NAMES['c'][unique_name] = unique_name
     elif c_ns('type') in node.attrib:
+        components = get_gi_name_components(node)
+        gi_name = '.'.join(components)
         __TRANSLATED_NAMES['python'][unique_name] = gi_name
         __TRANSLATED_NAMES['javascript'][unique_name] = gi_name
         __TRANSLATED_NAMES['c'][unique_name] = unique_name
+    elif node.tag == core_ns('field'):
+        components = []
+        get_field_c_name_components(node, components)
+        display_name = '.'.join(components[1:])
+        __TRANSLATED_NAMES['python'][unique_name] = display_name
+        __TRANSLATED_NAMES['javascript'][unique_name] = display_name
+        __TRANSLATED_NAMES['c'][unique_name] = display_name
     else:
         __TRANSLATED_NAMES['python'][unique_name] = node.attrib.get('name')
         __TRANSLATED_NAMES['javascript'][unique_name] = node.attrib.get('name')
@@ -89,9 +111,7 @@ def get_translation(unique_name, language):
     return __TRANSLATED_NAMES[language].get(unique_name)
 
 
-def __update_hierarchies(cur_ns, node):
-    gi_name = '.'.join(get_gi_name_components(node))
-    __ALL_GI_TYPES[gi_name] = get_klass_name(node)
+def __update_hierarchies(cur_ns, node, gi_name):
     parent_name = node.attrib.get('parent')
     if not parent_name:
         return
@@ -106,7 +126,7 @@ def __get_parent_link_recurse(gi_name, res):
     parents = __HIERARCHY_GRAPH.predecessors(gi_name)
     if parents:
         __get_parent_link_recurse(parents[0], res)
-    ctype_name = __ALL_GI_TYPES[gi_name]
+    ctype_name = ALL_GI_TYPES[gi_name]
     qs = QualifiedSymbol(type_tokens=[Link(None, ctype_name, ctype_name)])
     qs.add_extension_attribute ('gi-extension', 'type_desc',
             SymbolTypeDesc([], gi_name, ctype_name, 0))
@@ -134,7 +154,7 @@ def get_klass_children(gi_name):
     res = {}
     children = __HIERARCHY_GRAPH.successors(gi_name)
     for gi_name in children:
-        ctype_name = __ALL_GI_TYPES[gi_name]
+        ctype_name = ALL_GI_TYPES[gi_name]
         qs = QualifiedSymbol(type_tokens=[Link(None, ctype_name, ctype_name)])
         qs.add_extension_attribute ('gi-extension', 'type_desc',
                 SymbolTypeDesc([], gi_name, ctype_name, 0))
@@ -157,18 +177,24 @@ def cache_nodes(gir_root, all_girs):
             namespaces=NS_MAP):
         make_translations (node.attrib[id_key], node)
 
-    id_type = '{%s}type' % NS_MAP['c']
-    class_tag = '{%s}class' % NS_MAP['core']
-    interface_tag = '{%s}interface' % NS_MAP['core']
+    id_type = c_ns('type')
+    class_tag = core_ns('class')
+    interface_tag = core_ns('interface')
     for node in gir_root.xpath(
             './/*[not(self::core:type) and not (self::core:array)][@c:type]',
             namespaces=NS_MAP):
         name = node.attrib[id_type]
         make_translations (name, node)
-        if node.tag in [class_tag, interface_tag]:
-            __update_hierarchies (ns_node.attrib.get('name'), node)
+        gi_name = '.'.join(get_gi_name_components(node))
+        ALL_GI_TYPES[gi_name] = get_klass_name(node)
+        if node.tag in (class_tag, interface_tag):
+            __update_hierarchies (ns_node.attrib.get('name'), node, gi_name)
             make_translations('%s::%s' % (name, name), node)
             __generate_smart_filters(id_prefixes, sym_prefixes, node)
+
+    for field in gir_root.xpath('.//self::core:field', namespaces=NS_MAP):
+        unique_name = get_field_c_name(field)
+        make_translations(unique_name, field)
 
     for node in gir_root.xpath(
             './/core:property',
@@ -215,7 +241,7 @@ def __type_tokens_from_gitype (cur_ns, ptype_name):
         return None
 
     namespaced = '%s.%s' % (cur_ns, ptype_name)
-    ptype_name = __ALL_GI_TYPES.get(namespaced) or __ALL_GI_TYPES.get(ptype_name) or ptype_name
+    ptype_name = ALL_GI_TYPES.get(namespaced) or ALL_GI_TYPES.get(ptype_name) or ptype_name
 
     type_link = Link (None, ptype_name, ptype_name)
 
@@ -256,7 +282,7 @@ def type_description_from_node(gi_node):
         type_tokens = __type_tokens_from_gitype (cur_ns, gi_name)
 
     namespaced = '%s.%s' % (cur_ns, gi_name)
-    if namespaced in __ALL_GI_TYPES:
+    if namespaced in ALL_GI_TYPES:
         gi_name = namespaced
 
     return SymbolTypeDesc(type_tokens, gi_name, ctype_name, array_nesting)

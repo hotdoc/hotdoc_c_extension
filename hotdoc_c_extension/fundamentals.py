@@ -47,6 +47,10 @@ def _create_javascript_fundamentals():
             Link('https://developer.mozilla.org/en-US/docs/Web/'
                     'JavaScript/Reference/Global_Objects/null',
                     'null', None)
+    gtype_link = \
+            Link('https://developer.gnome.org/gobject/stable/'
+                    'gobject-Type-Information.html#GType',
+                    'GObject.Type', None)
 
     fundamentals = {
             'gchararray': string_link,
@@ -77,6 +81,7 @@ def _create_javascript_fundamentals():
             'TRUE': true_link,
             'FALSE': false_link,
             'gpointer': pointer_link,
+            'GType': gtype_link,
             'NULL': null_link,
             }
     return fundamentals
@@ -126,7 +131,7 @@ def _create_python_fundamentals():
             "gboolean": boolean_link,
             "gint8": integer_link,
             "guint8": integer_link,
-            "gint15": integer_link,
+            "gint16": integer_link,
             "guint16": integer_link,
             "gint32": integer_link,
             "guint32": integer_link,

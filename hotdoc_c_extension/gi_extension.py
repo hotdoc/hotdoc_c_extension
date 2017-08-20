@@ -41,7 +41,6 @@ from hotdoc.utils.loggable import warn, Logger
 from hotdoc.utils.utils import OrderedSet
 
 from .gi_formatter import GIFormatter
-from .gi_symbols import *
 from .gi_annotation_parser import GIAnnotationParser
 from .fundamentals import FUNDAMENTALS
 
@@ -56,9 +55,7 @@ Logger.register_warning_code('no-location-indication', InvalidOutputException,
 
 # Describes the type of Return or Parameter symbols
 SymbolTypeDesc = namedtuple('SymbolTypeDesc', [
-    'type_tokens', 'gi_name', 'c_name', 'nesting_depth',
-    'langs_tokens'
-])
+    'type_tokens', 'gi_name', 'c_name', 'nesting_depth'])
 
 class Flag (object):
     def __init__ (self, nick, link):
@@ -729,7 +726,7 @@ class GIExtension(Extension):
     def __formatting_symbol(self, formatter, symbol, language):
         symbol.add_extension_attribute(self.extension_name, 'language', language)
 
-        if type(symbol) in [GIReturnItemSymbol, GIParameterSymbol]:
+        if isinstance(symbol, (ReturnItemSymbol, ParameterSymbol)):
             self.__add_annotations (formatter, symbol)
 
         if isinstance (symbol, QualifiedSymbol):
@@ -937,12 +934,6 @@ class GIExtension(Extension):
             gi_name = ptype_.attrib.get('name')
 
         cur_ns = self.__get_namespace(gi_node)
-        translated_tokens = None
-        if array_nesting > 0:
-            translated_tokens = ['['] + self.__type_tokens_from_gitype (cur_ns, gi_name) + [']']
-            if array_nesting == 1 and type_.attrib.get(c_ns('type')) == 'gchar**':
-                # gchar ** is being typed to utf8* by GI, special case it.
-                ctype_name = 'gchar**'
 
         if ctype_name is not None:
             type_tokens = self.__type_tokens_from_cdecl (ctype_name)
@@ -955,9 +946,7 @@ class GIExtension(Extension):
         if namespaced in self.__class_nodes:
             gi_name = namespaced
 
-        return SymbolTypeDesc(type_tokens, gi_name, ctype_name, array_nesting,
-                              {'python': translated_tokens,
-                              'javascript': translated_tokens})
+        return SymbolTypeDesc(type_tokens, gi_name, ctype_name, array_nesting)
 
     def __create_parameter_symbol (self, gi_parameter, owner_name):
         param_name = gi_parameter.attrib['name']
@@ -967,10 +956,7 @@ class GIExtension(Extension):
         if direction is None:
             direction = 'in'
 
-        res = GISymbolIface.from_tokens(GIParameterSymbol,
-                                        argname=param_name,
-                                        c_tokens=type_desc.type_tokens,
-                                        langs_tokens=type_desc.langs_tokens)
+        res = ParameterSymbol(argname=param_name, type_tokens=type_desc.type_tokens)
         self.__add_symbol_attrs(res, gi_name=type_desc.gi_name, owner_name=owner_name,
                                 direction=direction)
 
@@ -982,9 +968,7 @@ class GIExtension(Extension):
         if type_desc.gi_name == 'none':
             ret_item = None
         else:
-            ret_item = GISymbolIface.from_tokens(
-                GIReturnItemSymbol, c_tokens=type_desc.type_tokens,
-                langs_tokens=type_desc.langs_tokens)
+            ret_item = ReturnItemSymbol(type_tokens=type_desc.type_tokens)
 
             self.__add_symbol_attrs(ret_item, gi_name=type_desc.gi_name,
                                     owner_name=owner_name)
@@ -992,11 +976,8 @@ class GIExtension(Extension):
         res = [ret_item]
 
         for out_param in out_parameters:
-            ret_item = GISymbolIface.from_tokens(
-                GIReturnItemSymbol,
-                c_tokens=out_param.input_tokens,
-                name=out_param.argname,
-                langs_tokens=out_param.get_lang_tokens())
+            ret_item = ReturnItemSymbol(type_tokens=out_param.input_tokens,
+                    name=out_param.argname)
 
             self.__add_symbol_attrs(ret_item, owner_name=owner_name)
             res.append(ret_item)

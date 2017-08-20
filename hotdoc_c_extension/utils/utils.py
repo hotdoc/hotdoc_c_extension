@@ -1,8 +1,12 @@
+from collections import namedtuple
 import cchardet
 from ..c_comment_scanner.c_comment_scanner import extract_comments
 
 from hotdoc.core.symbols import *
 from hotdoc.utils.loggable import debug
+
+
+RawMacro = namedtuple('RawMacro', ['raw', 'filename'])
 
 
 def unicode_dammit(data):
@@ -16,9 +20,9 @@ class CCommentExtractor:
         self.app = extension.app
         self.project = extension.project
         self.__raw_comment_parser = comment_parser
+        self.__raw_macros = []
 
-    def parse_comments(self, filenames, filter_names=None):
-        filter_names = filter_names or {}
+    def parse_comments(self, filenames):
         for filename in filenames:
             with open (filename, 'rb') as f:
                 debug('Getting comments in %s' % filename)
@@ -44,9 +48,15 @@ class CCommentExtractor:
                             self.app.database.add_comment(block)
                     elif not skip_next_symbol:
                         if header:
-                            self.__create_macro_from_raw_text(c, filename, filter_names)
+                            self.__raw_macros.append(RawMacro(c, filename))
+                            #self.__create_macro_from_raw_text(c, filename, filter_names)
                     else:
                         skip_next_symbol = False
+
+    def create_macro_symbols(self, filter_names=None):
+        filter_names = filter_names or {}
+        for raw_macro in self.__raw_macros:
+            self.__create_macro_from_raw_text(raw_macro.raw, raw_macro.filename, filter_names)
 
     def __create_macro_from_raw_text(self, raw, filename, filter_names):
         mcontent = raw[0].replace('\t', ' ')
@@ -67,6 +77,9 @@ class CCommentExtractor:
         return self.__create_constant_symbol(stripped_name, filename, raw[1], raw[0])
 
     def __create_function_macro_symbol (self, name, filename, lineno, original_text):
+        if name in self.extension.created_symbols:
+            return None
+
         comment = self.app.database.get_comment(name)
 
         return_value = [None]
@@ -90,6 +103,9 @@ class CCommentExtractor:
         return sym
 
     def __create_constant_symbol (self, name, filename, lineno, original_text):
+        if name in self.extension.created_symbols:
+            return None
+
         return self.extension.get_or_create_symbol(ConstantSymbol,
                 original_text=original_text,
                 display_name=name, filename=filename,

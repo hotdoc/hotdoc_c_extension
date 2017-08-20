@@ -106,7 +106,9 @@ class GIExtension(Extension):
         self.__current_output_filename = None
         self.__class_gtype_structs = {}
         self.__default_page = DEFAULT_PAGE
-        self.__created_symbols = set()
+        self.created_symbols = set()
+        self.__raw_comment_parser = GtkDocParser (self.project)
+        self.__c_comment_extractor = CCommentExtractor(self, self.__raw_comment_parser)
 
     # Static vmethod implementations
 
@@ -156,6 +158,7 @@ class GIExtension(Extension):
 
         self.__scan_comments()
         self.__scan_sources()
+        self.__create_macro_symbols()
         self.app.link_resolver.resolving_link_signal.connect_after(self.__translate_link_ref, self.languages[0])
 
     def format_page(self, page, link_resolver, output):
@@ -199,10 +202,11 @@ class GIExtension(Extension):
             node = args.pop(1)
         aliases = kwargs.get('aliases', [])
 
+        unique_name = kwargs.get('unique_name', kwargs.get('display_name'))
+
         if self.smart_index:
             name = kwargs['display_name']
             if kwargs.get('filename', self.__default_page) == self.__default_page:
-                unique_name = kwargs.get('unique_name', kwargs.get('display_name'))
                 kwargs['filename'] = self.__get_symbol_filename(unique_name)
                 if kwargs.get('filename', self.__default_page) == self.__default_page:
                     self.warn("no-location-indication",
@@ -212,6 +216,9 @@ class GIExtension(Extension):
                               name, os.path.basename(self.__default_page)))
 
         res = super(GIExtension, self).get_or_create_symbol(*args, **kwargs)
+
+        if res:
+            self.created_symbols.add(res.unique_name)
 
         if node is not None and res:
             make_translations(res.unique_name, node)
@@ -471,10 +478,15 @@ class GIExtension(Extension):
             member.enum_value = field.attrib['value']
             members.append(member)
 
-        return self.get_or_create_symbol(
+        res = self.get_or_create_symbol(
             EnumSymbol, node, members=members,
             anonymous=False, display_name=name,
             filename=filename, raw_text=None)
+
+        for cnode in node:
+            self.__scan_node(cnode, parent_name=res.unique_name)
+
+        return res
 
     def __create_signal_symbol (self, node, parent_name):
         unique_name, name, klass_name = get_symbol_names(node)
@@ -738,12 +750,15 @@ class GIExtension(Extension):
 
     def __scan_comments(self):
         comment_parser = GtkDocParser(self.project)
-        block = comment_parser.parse_comment(DEFAULT_PAGE_COMMENT,
+        block = self.__raw_comment_parser.parse_comment(DEFAULT_PAGE_COMMENT,
                                              DEFAULT_PAGE, 0, 0)
         self.app.database.add_comment(block)
 
         stale_c, unlisted = self.get_stale_files(self.c_sources)
-        CCommentExtractor(self, comment_parser).parse_comments(stale_c, SMART_FILTERS)
+        self.__c_comment_extractor.parse_comments(stale_c)
+
+    def __create_macro_symbols(self):
+        self.__c_comment_extractor.create_macro_symbols(SMART_FILTERS)
 
     def __scan_node(self, node, parent_name=None):
         gi_name = get_gi_name (node)
@@ -797,9 +812,6 @@ class GIExtension(Extension):
             symbol.extension_contents.pop('Annotations', None)
 
     def __formatting_symbol(self, formatter, symbol, language):
-        if isinstance (symbol, Symbol) and symbol.unique_name == 'gst_debug_level_get_name':
-            print ('I will give my verdict here and now')
-
         self.add_attrs(symbol, language=language)
 
         if isinstance(symbol, (ReturnItemSymbol, ParameterSymbol)):
@@ -811,8 +823,6 @@ class GIExtension(Extension):
         # We discard symbols at formatting time because they might be exposed
         # in other languages
         if language != 'c':
-            if isinstance (symbol, Symbol) and symbol.unique_name == 'gst_debug_level_get_name':
-                print ("Introspectable:", is_introspectable(symbol.unique_name, language))
             return is_introspectable(symbol.unique_name, language)
 
         return True

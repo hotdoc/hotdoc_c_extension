@@ -135,6 +135,23 @@ def c_ns(tag):
     return '{http://www.gtk.org/introspection/c/1.0}%s' % tag
 
 
+def unnest_type (parameter):
+    array_nesting = 0
+    container_type = array = parameter.find(core_ns('array'))
+    if array is None:
+        array = parameter.find(core_ns('type[@name="GLib.List"]'))
+        container_type = array
+
+    while array is not None:
+        array_nesting += 1
+        parameter = array
+        array = parameter.find(core_ns('array'))
+        if array is None:
+            array = parameter.find(core_ns('type[@name="GLib.List"]'))
+
+    return container_type, parameter, array_nesting
+
+
 DEFAULT_PAGE = "Miscellaneous.default_page"
 DEFAULT_PAGE_COMMENT = """/**
 * Miscellaneous.default_page:
@@ -845,22 +862,6 @@ class GIExtension(Extension):
 
         return res
 
-    def __unnest_type (self, parameter):
-        array_nesting = 0
-        container_type = array = parameter.find(core_ns('array'))
-        if array is None:
-            array = parameter.find(core_ns('type[@name="GLib.List"]'))
-            container_type = array
-
-        while array is not None:
-            array_nesting += 1
-            parameter = array
-            array = parameter.find(core_ns('array'))
-            if array is None:
-                array = parameter.find(core_ns('type[@name="GLib.List"]'))
-
-        return container_type, parameter, array_nesting
-
     def __type_tokens_from_cdecl(self, cdecl):
         indirection = cdecl.count ('*')
         qualified_type = cdecl.strip ('*')
@@ -919,7 +920,7 @@ class GIExtension(Extension):
             attrname, None)
 
     def __type_description_from_node(self, gi_node):
-        container_type, type_, array_nesting = self.__unnest_type (gi_node)
+        container_type, type_, array_nesting = unnest_type (gi_node)
 
         varargs = type_.find('{http://www.gtk.org/introspection/core/1.0}varargs')
         if varargs is not None:

@@ -551,6 +551,14 @@ def is_introspectable(name, language):
     return True
 
 
+def insert_language(ref, language, project):
+    if not ref.startswith(project.sanitized_name + '/'):
+        return language + '/' + ref
+
+    p = pathlib.Path(ref)
+    return str(pathlib.Path(p.parts[0], language, *p.parts[1:]))
+
+
 ALIASED_LINKS = {l: {} for l in OUTPUT_LANGUAGES}
 
 DEFAULT_PAGE = "Miscellaneous.default_page"
@@ -883,13 +891,6 @@ class GIExtension(Extension):
 
         return True
 
-    def insert_language(self, ref, language, project):
-        if not ref.startswith(project.sanitized_name + '/'):
-            return language + '/' + ref
-
-        p = pathlib.Path(ref)
-        return str(pathlib.Path(p.parts[0], language, *p.parts[1:]))
-
     def __translate_link_ref(self, link, language):
         fund = FUNDAMENTALS[language].get(link.id_)
         if fund:
@@ -906,9 +907,9 @@ class GIExtension(Extension):
 
             project = self.project.get_project_for_page (page)
             if link.ref and language != 'c' and not is_introspectable(link.id_, language):
-                return self.insert_language(link.ref, 'c', project)
+                return insert_language(link.ref, 'c', project)
 
-            res = self.insert_language(link.ref, language, project)
+            res = insert_language(link.ref, language, project)
             return res
 
         if link.ref is None:

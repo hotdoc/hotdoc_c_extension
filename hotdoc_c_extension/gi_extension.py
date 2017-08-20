@@ -319,14 +319,18 @@ ALL_GIRS = {}
 # Avoid parsing gir files multiple times
 PARSED_GIRS = set()
 
+if os.name == 'nt':
+    DATADIR = os.path.join(os.path.dirname(__file__), '..', 'share')
+else:
+    DATADIR = "/usr/share"
 
-def find_gir_file(gir_name, datadir):
+def find_gir_file(gir_name):
     if gir_name in ALL_GIRS:
         return ALL_GIRS[gir_name]
 
     xdg_dirs = os.getenv('XDG_DATA_DIRS') or ''
     xdg_dirs = [p for p in xdg_dirs.split(':') if p]
-    xdg_dirs.append(datadir)
+    xdg_dirs.append(DATADIR)
     for dir_ in xdg_dirs:
         gir_file = os.path.join(dir_, 'gir-1.0', gir_name)
         if os.path.exists(gir_file):
@@ -354,7 +358,7 @@ NODE_CACHE = {}
 CLASS_NODES = {}
 
 
-def cache_nodes(gir_root, datadir):
+def cache_nodes(gir_root):
     ns_node = gir_root.find('./{%s}namespace' % NS_MAP['core'])
     id_prefixes = ns_node.attrib['{%s}identifier-prefixes' % NS_MAP['c']]
     sym_prefixes = ns_node.attrib['{%s}symbol-prefixes' % NS_MAP['c']]
@@ -403,7 +407,7 @@ def cache_nodes(gir_root, datadir):
             namespaces = NS_MAP):
         inc_name = inc.attrib["name"]
         inc_version = inc.attrib["version"]
-        gir_file = find_gir_file('%s-%s.gir' % (inc_name, inc_version), datadir)
+        gir_file = find_gir_file('%s-%s.gir' % (inc_name, inc_version))
         if not gir_file:
             warn('missing-gir-include', "Couldn't find a gir for %s-%s.gir" %
                     (inc_name, inc_version))
@@ -414,7 +418,94 @@ def cache_nodes(gir_root, datadir):
 
         PARSED_GIRS.add(gir_file)
         inc_gir_root = etree.parse(gir_file).getroot()
-        cache_nodes(inc_gir_root, datadir)
+        cache_nodes(inc_gir_root)
+
+
+GTKDOC_HREFS = {}
+
+
+def parse_devhelp_index(dir_):
+    path = os.path.join(dir_, os.path.basename(dir_) + '.devhelp2')
+    if not os.path.exists(path):
+        return False
+
+    dh_root = etree.parse(path).getroot()
+    online = dh_root.attrib.get('online')
+    name = dh_root.attrib.get('name')
+    if not online:
+        if not name:
+            return False
+        online = 'https://developer.gnome.org/%s/unstable/' % name
+
+    keywords = dh_root.findall('.//{http://www.devhelp.net/book}keyword')
+    for kw in keywords:
+        name = kw.attrib["name"]
+        type_ = kw.attrib['type']
+        link = kw.attrib['link']
+
+        if type_ in ['macro', 'function']:
+            name = name.rstrip(u' ()')
+        elif type_ in ['struct', 'enum']:
+            split = name.split(' ', 1)
+            if len(split) == 2:
+                name = split[1]
+            else:
+                name = split[0]
+        elif type_ in ['signal', 'property']:
+            anchor = link.split('#', 1)[1]
+            split = anchor.split('-', 1)
+            if type_ == 'signal':
+                name = '%s::%s' % (split[0], split[1].lstrip('-'))
+            else:
+                name = '%s:%s' % (split[0], split[1].lstrip('-'))
+
+        GTKDOC_HREFS[name] = online + link
+
+    return True
+
+
+def parse_sgml_index(dir_):
+    remote_prefix = ""
+    n_links = 0
+    path = os.path.join(dir_, "index.sgml")
+    with open(path, 'r') as f:
+        for l in f:
+            if l.startswith("<ONLINE"):
+                remote_prefix = l.split('"')[1]
+            elif not remote_prefix:
+                break
+            elif l.startswith("<ANCHOR"):
+                split_line = l.split('"')
+                filename = split_line[3].split('/', 1)[-1]
+                title = split_line[1].replace('-', '_')
+
+                if title.endswith (":CAPS"):
+                    title = title [:-5]
+                if remote_prefix:
+                    href = '%s/%s' % (remote_prefix, filename)
+                else:
+                    href = filename
+
+                GTKDOC_HREFS[title] = href
+                n_links += 1
+
+def gather_gtk_doc_links ():
+    gtkdoc_dir = os.path.join(DATADIR, "gtk-doc", "html")
+    if not os.path.exists(gtkdoc_dir):
+        print("no gtk doc to gather links from in %s" % gtkdoc_dir)
+        return
+
+    for node in os.listdir(gtkdoc_dir):
+        dir_ = os.path.join(gtkdoc_dir, node)
+        if os.path.isdir(dir_):
+            if not parse_devhelp_index(dir_):
+                try:
+                    parse_sgml_index(dir_)
+                except IOError:
+                    pass
+
+
+gather_gtk_doc_links()
 
 
 DEFAULT_PAGE = "Miscellaneous.default_page"
@@ -437,9 +528,6 @@ NS_MAP = {'core': 'http://www.gtk.org/introspection/core/1.0',
 class GIExtension(Extension):
     extension_name = "gi-extension"
     argument_prefix = "gi"
-
-    __gathered_gtk_doc_links = False
-    __gtkdoc_hrefs = {}
 
     __translated_names = {l: {} for l in OUTPUT_LANGUAGES}
     __aliased_links = {l: {} for l in OUTPUT_LANGUAGES}
@@ -484,7 +572,7 @@ class GIExtension(Extension):
             self.languages = OUTPUT_LANGUAGES
         for gir_file in self.sources:
             gir_root = etree.parse(gir_file).getroot()
-            cache_nodes(gir_root, self.project.datadir)
+            cache_nodes(gir_root)
         self.__create_hierarchies()
 
     def _make_formatter(self):
@@ -502,10 +590,6 @@ class GIExtension(Extension):
             DEFAULT_PAGE)
 
         super(GIExtension, self).setup()
-
-        if not GIExtension.__gathered_gtk_doc_links:
-            self.__gather_gtk_doc_links()
-            GIExtension.__gathered_gtk_doc_links = True
 
         if not self.sources:
             return
@@ -735,90 +819,6 @@ class GIExtension(Extension):
         hierarchy.reverse()
         return hierarchy
 
-    def __gather_gtk_doc_links (self):
-        gtkdoc_dir = os.path.join(self.project.datadir, "gtk-doc", "html")
-        if not os.path.exists(gtkdoc_dir):
-            print("no gtk doc to gather links from in %s" % gtkdoc_dir)
-            return
-
-        for node in os.listdir(gtkdoc_dir):
-            dir_ = os.path.join(gtkdoc_dir, node)
-            if os.path.isdir(dir_):
-                if not self.__parse_devhelp_index(dir_):
-                    try:
-                        self.__parse_sgml_index(dir_)
-                    except IOError:
-                        pass
-
-    def __parse_devhelp_index(self, dir_):
-        path = os.path.join(dir_, os.path.basename(dir_) + '.devhelp2')
-        if not os.path.exists(path):
-            return False
-
-        dh_root = etree.parse(path).getroot()
-        online = dh_root.attrib.get('online')
-        name = dh_root.attrib.get('name')
-        if not online:
-            if not name:
-                return False
-            online = 'https://developer.gnome.org/%s/unstable/' % name
-
-        keywords = dh_root.findall('.//{http://www.devhelp.net/book}keyword')
-        for kw in keywords:
-            name = kw.attrib["name"]
-            type_ = kw.attrib['type']
-            link = kw.attrib['link']
-
-            if type_ in ['macro', 'function']:
-                name = name.rstrip(u' ()')
-            elif type_ in ['struct', 'enum']:
-                split = name.split(' ', 1)
-                if len(split) == 2:
-                    name = split[1]
-                else:
-                    name = split[0]
-            elif type_ in ['signal', 'property']:
-                anchor = link.split('#', 1)[1]
-                split = anchor.split('-', 1)
-                if type_ == 'signal':
-                    name = '%s::%s' % (split[0], split[1].lstrip('-'))
-                else:
-                    name = '%s:%s' % (split[0], split[1].lstrip('-'))
-
-            self.__gtkdoc_hrefs[name] = online + link
-
-        # self.info('Gathered %d links from devhelp index %s' % (len(keywords), path))
-
-        return True
-
-    def __parse_sgml_index(self, dir_):
-        remote_prefix = ""
-        n_links = 0
-        path = os.path.join(dir_, "index.sgml")
-        with open(path, 'r') as f:
-            for l in f:
-                if l.startswith("<ONLINE"):
-                    remote_prefix = l.split('"')[1]
-                elif not remote_prefix:
-                    break
-                elif l.startswith("<ANCHOR"):
-                    split_line = l.split('"')
-                    filename = split_line[3].split('/', 1)[-1]
-                    title = split_line[1].replace('-', '_')
-
-                    if title.endswith (":CAPS"):
-                        title = title [:-5]
-                    if remote_prefix:
-                        href = '%s/%s' % (remote_prefix, filename)
-                    else:
-                        href = filename
-
-                    self.__gtkdoc_hrefs[title] = href
-                    n_links += 1
-
-        if n_links > 0:
-            self.debug('Gathered %d links from sgml index %s' % (n_links, path))
-
     def __add_annotations (self, formatter, symbol):
         if symbol.get_extension_attribute(self.extension_name, 'language') == 'c':
             annotations = self.__annotation_parser.make_annotations(symbol)
@@ -892,7 +892,7 @@ class GIExtension(Extension):
             return res
 
         if link.ref is None:
-            return self.__gtkdoc_hrefs.get(link.id_)
+            return GTKDOC_HREFS.get(link.id_)
 
         return None
 
@@ -919,7 +919,7 @@ class GIExtension(Extension):
         if translated:
             return translated
 
-        if language == 'c' and link.id_ in self.__gtkdoc_hrefs:
+        if language == 'c' and link.id_ in GTKDOC_HREFS:
             return link.id_
 
         return None

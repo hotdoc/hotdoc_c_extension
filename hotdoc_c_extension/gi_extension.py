@@ -508,6 +508,11 @@ def gather_gtk_doc_links ():
 gather_gtk_doc_links()
 
 
+OUTPUT_LANGUAGES = ['c', 'python', 'javascript']
+
+TRANSLATED_NAMES = {l: {} for l in OUTPUT_LANGUAGES}
+ALIASED_LINKS = {l: {} for l in OUTPUT_LANGUAGES}
+
 DEFAULT_PAGE = "Miscellaneous.default_page"
 DEFAULT_PAGE_COMMENT = """/**
 * Miscellaneous.default_page:
@@ -518,9 +523,6 @@ DEFAULT_PAGE_COMMENT = """/**
 */
 """
 
-
-OUTPUT_LANGUAGES = ['c', 'python', 'javascript']
-
 NS_MAP = {'core': 'http://www.gtk.org/introspection/core/1.0',
           'c': 'http://www.gtk.org/introspection/c/1.0',
           'glib': 'http://www.gtk.org/introspection/glib/1.0'}
@@ -529,9 +531,6 @@ class GIExtension(Extension):
     extension_name = "gi-extension"
     argument_prefix = "gi"
 
-    __translated_names = {l: {} for l in OUTPUT_LANGUAGES}
-    __aliased_links = {l: {} for l in OUTPUT_LANGUAGES}
-
     def __init__(self, app, project):
         Extension.__init__(self, app, project)
 
@@ -539,9 +538,7 @@ class GIExtension(Extension):
 
         self.__gir_hierarchies = {}
         self.__gir_children_map = defaultdict(dict)
-
         self.__annotation_parser = GIAnnotationParser()
-
         self.__current_output_filename = None
         self.__class_gtype_structs = {}
         self.__default_page = DEFAULT_PAGE
@@ -839,7 +836,7 @@ class GIExtension(Extension):
         if node is None:
             return False
 
-        if not name in self.__translated_names['c']:
+        if not name in TRANSLATED_NAMES['c']:
             self.__add_translations(name, node)
 
         if node.attrib.get('introspectable') == '0':
@@ -875,7 +872,7 @@ class GIExtension(Extension):
         if fund:
             return fund.ref
 
-        aliased_link = self.__aliased_links[language].get(link.id_)
+        aliased_link = ALIASED_LINKS[language].get(link.id_)
         if aliased_link:
             return self.__translate_link_ref(aliased_link, language)
 
@@ -911,11 +908,11 @@ class GIExtension(Extension):
         if language != 'c' and not self.__is_introspectable(link.id_, language):
             return link._title + ' (not introspectable)'
 
-        aliased_link = self.__aliased_links[language].get(link.id_)
+        aliased_link = ALIASED_LINKS[language].get(link.id_)
         if aliased_link:
             return self.__translate_link_title(aliased_link, language)
 
-        translated = self.__translated_names[language].get(link.id_)
+        translated = TRANSLATED_NAMES[language].get(link.id_)
         if translated:
             return translated
 
@@ -1196,7 +1193,7 @@ class GIExtension(Extension):
                 FUNDAMENTALS[lang][name] = fund_type
             else:
                 if alias_link:
-                    self.__aliased_links[lang][name] = alias_link[0]
+                    ALIASED_LINKS[lang][name] = alias_link[0]
 
         return self.get_or_create_symbol(AliasSymbol, node,
                                          aliased_type=aliased_type,
@@ -1417,14 +1414,14 @@ class GIExtension(Extension):
         gi_name = '.'.join(components)
 
         if id_key in node.attrib:
-            self.__translated_names['python'][unique_name] = gi_name
+            TRANSLATED_NAMES['python'][unique_name] = gi_name
             components[-1] = 'prototype.%s' % components[-1]
-            self.__translated_names['javascript'][unique_name] = '.'.join(components)
-            self.__translated_names['c'][unique_name] = unique_name
+            TRANSLATED_NAMES['javascript'][unique_name] = '.'.join(components)
+            TRANSLATED_NAMES['c'][unique_name] = unique_name
         elif id_type in node.attrib:
-            self.__translated_names['python'][unique_name] = gi_name
-            self.__translated_names['javascript'][unique_name] = gi_name
-            self.__translated_names['c'][unique_name] = unique_name
+            TRANSLATED_NAMES['python'][unique_name] = gi_name
+            TRANSLATED_NAMES['javascript'][unique_name] = gi_name
+            TRANSLATED_NAMES['c'][unique_name] = unique_name
 
         return components, gi_name
 

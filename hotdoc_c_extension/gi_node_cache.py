@@ -108,6 +108,8 @@ def __get_parent_link_recurse(gi_name, res):
         __get_parent_link_recurse(parents[0], res)
     ctype_name = __ALL_GI_TYPES[gi_name]
     qs = QualifiedSymbol(type_tokens=[Link(None, ctype_name, ctype_name)])
+    qs.add_extension_attribute ('gi-extension', 'type_desc',
+            SymbolTypeDesc([], gi_name, ctype_name, 0))
     res.append(qs)
 
 
@@ -133,7 +135,10 @@ def get_klass_children(gi_name):
     children = __HIERARCHY_GRAPH.successors(gi_name)
     for gi_name in children:
         ctype_name = __ALL_GI_TYPES[gi_name]
-        res[ctype_name] = QualifiedSymbol(type_tokens=[Link(None, ctype_name, ctype_name)])
+        qs = QualifiedSymbol(type_tokens=[Link(None, ctype_name, ctype_name)])
+        qs.add_extension_attribute ('gi-extension', 'type_desc',
+                SymbolTypeDesc([], gi_name, ctype_name, 0))
+        res[ctype_name] = qs
     return res
 
 

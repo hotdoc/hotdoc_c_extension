@@ -1,6 +1,8 @@
 import unittest
+import importlib
 from lxml import etree
-from hotdoc_c_extension.gi_extension import *
+CACHE_MODULE = importlib.import_module('hotdoc_c_extension.gi_node_cache')
+from hotdoc_c_extension.gi_utils import core_ns, unnest_type
 
 GIR_TEMPLATE = \
 '''
@@ -20,11 +22,10 @@ GIR_TEMPLATE = \
 </repository>
 '''
 
-ARRAY_TYPE = \
+TEST_GREETER_LIST_GREETS = \
 '''
 <method name="list_greets" c:identifier="test_greeter_list_greets">
   <return-value transfer-ownership="full">
-    <doc xml:space="preserve">The list of greetings @greeter can do</doc>
     <array c:type="gchar***">
       <array>
         <type name="utf8"/>
@@ -34,11 +35,10 @@ ARRAY_TYPE = \
 </method>
 '''
 
-LIST_TYPE = \
+TEST_GREETER_LIST_GREETERS = \
 '''
-<method name="list_greets" c:identifier="test_greeter_list_greets">
+<method name="list_greeters" c:identifier="test_greeter_list_greeters">
   <return-value transfer-ownership="full">
-    <doc xml:space="preserve">The friends to check</doc>
     <type name="GLib.List" c:type="GList*">
       <type name="Greeter"/>
     </type>
@@ -46,28 +46,27 @@ LIST_TYPE = \
 </method>
 '''
 
-STRING_TYPE = \
+TEST_GREETER_GREET = \
 '''
-<method name="list_greets" c:identifier="test_greeter_list_greets">
+<method name="greet" c:identifier="test_greeter_greet">
   <return-value transfer-ownership="full">
-    <doc xml:space="preserve">something to bar</doc>
     <type name="utf8" c:type="gchar*"/>
   </return-value>
 </method>
 '''
 
-NONE_TYPE = \
+TEST_GREETER_DO_NOTHING = \
 '''
-<method name="list_greets" c:identifier="test_greeter_list_greets">
+<method name="do_nothing" c:identifier="test_greeter_do_nothing">
   <return-value>
     <type name="none" c:type="void"/>
   </return-value>
 </method>
 '''
 
-VARARGS_TYPE = \
+TEST_GREETER_GREET_MANY = \
 '''
-<method name="list_greets" c:identifier="test_greeter_list_greets">
+<method name="greet_many" c:identifier="test_greeter_greet_many">
   <parameters>
     <parameter name='...' transfer-ownership="none">
       <varargs/>
@@ -77,9 +76,11 @@ VARARGS_TYPE = \
 '''
 
 
-UNKNOWN_TYPE = \
+# Happens in some signals, I assume it's a gi bug but let's check that
+# we don't react too bad
+TEST_GREETER_GREET_BROKEN = \
 '''
-<method name="list_greets" c:identifier="test_greeter_list_greets">
+<method name="greet_broken" c:identifier="test_greeter_greet_broken">
   <return-value>
     <type/>
   </return-value>
@@ -87,9 +88,10 @@ UNKNOWN_TYPE = \
 '''
 
 
-GI_TYPE = \
+# Happens in signals
+TEST_GREETER_GREET_GI_OBJECT = \
 '''
-<method name="list_greets" c:identifier="test_greeter_list_greets">
+<method name="greet_gi_object" c:identifier="test_greeter_greet_gi_object">
   <return-value>
     <type name="GObject.Object"/>
   </return-value>
@@ -97,8 +99,7 @@ GI_TYPE = \
 '''
 
 
-
-class TestGIExtension(unittest.TestCase):
+class TestTypeUnnesting(unittest.TestCase):
     def assertRetvalTypesEqual(self, symbol_string, ctype_name, gi_name, array_nesting):
         test_data = GIR_TEMPLATE % symbol_string
         gir_root = etree.fromstring (test_data)
@@ -107,26 +108,45 @@ class TestGIExtension(unittest.TestCase):
         self.assertTupleEqual (unnest_type (retval), (ctype_name, gi_name, array_nesting))
 
     def test_array_type(self):
-        self.assertRetvalTypesEqual(ARRAY_TYPE, 'gchar***', 'utf8', 2)
+        self.assertRetvalTypesEqual(TEST_GREETER_LIST_GREETS, 'gchar***', 'utf8', 2)
 
     def test_list_type(self):
-        self.assertRetvalTypesEqual(LIST_TYPE, 'GList*', 'Greeter', 1)
+        self.assertRetvalTypesEqual(TEST_GREETER_LIST_GREETERS, 'GList*', 'Greeter', 1)
 
     def test_string_type(self):
-        self.assertRetvalTypesEqual(STRING_TYPE, 'gchar*', 'utf8', 0)
+        self.assertRetvalTypesEqual(TEST_GREETER_GREET, 'gchar*', 'utf8', 0)
 
     def test_none_type(self):
-        self.assertRetvalTypesEqual(NONE_TYPE, 'void', 'none', 0)
+        self.assertRetvalTypesEqual(TEST_GREETER_DO_NOTHING, 'void', 'none', 0)
 
     def test_unknown_type(self):
-        self.assertRetvalTypesEqual(UNKNOWN_TYPE, None, 'object', 0)
+        self.assertRetvalTypesEqual(TEST_GREETER_GREET_BROKEN, None, 'object', 0)
 
     def test_gi_type(self):
-        self.assertRetvalTypesEqual(GI_TYPE, None, 'GObject.Object', 0)
+        self.assertRetvalTypesEqual(TEST_GREETER_GREET_GI_OBJECT, None, 'GObject.Object', 0)
 
     def test_varargs_type(self):
-        test_data = GIR_TEMPLATE % VARARGS_TYPE
+        test_data = GIR_TEMPLATE % TEST_GREETER_GREET_MANY
         gir_root = etree.fromstring (test_data)
         param = gir_root.find('.//%s/%s/%s' %
                 (core_ns ('method'), core_ns('parameters'), core_ns('parameter')))
         self.assertTupleEqual (unnest_type (param), ('...', 'valist', 0))
+
+class TestNodeCaching(unittest.TestCase):
+    def setUp(self):
+        importlib.reload(CACHE_MODULE)
+
+    def test_array_type(self):
+        test_data = GIR_TEMPLATE % TEST_GREETER_LIST_GREETS
+        gir_root = etree.fromstring (test_data)
+        CACHE_MODULE.cache_nodes(gir_root, [])
+        translated = CACHE_MODULE.get_translation('test_greeter_list_greets', 'python')
+        self.assertEqual (translated, 'Test.list_greets')
+        translated = CACHE_MODULE.get_translation('test_greeter_list_greets', 'javascript')
+        self.assertEqual (translated, 'Test.prototype.list_greets')
+        retval = gir_root.find('.//%s/%s' %
+                (core_ns ('method'), core_ns('return-value')))
+        type_desc = CACHE_MODULE.type_description_from_node(retval)
+        self.assertEqual(type_desc.gi_name, 'utf8')
+        self.assertEqual(type_desc.c_name, 'gchar***')
+        self.assertEqual(type_desc.nesting_depth, 2)

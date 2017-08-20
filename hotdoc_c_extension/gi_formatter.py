@@ -32,9 +32,6 @@ class GIFormatter(Formatter):
         Formatter.__init__(self, gi_extension, searchpath)
         self._order_by_parent = True
 
-    def format_symbol(self, symbol, link_resolver):
-        return super().format_symbol(symbol, link_resolver)
-
     def format_annotations (self, annotations):
         template = self.engine.get_template('gi_annotations.html')
         return template.render ({'annotations': annotations})
@@ -47,6 +44,9 @@ class GIFormatter(Formatter):
     def _format_type_tokens(self, symbol, type_tokens):
         language = symbol.get_extension_attribute(self.extension.extension_name, 'language')
         if language != 'c':
+            type_desc = self.extension.get_attr(symbol, 'type_desc')
+            if type_desc is None:
+                print (symbol, type_tokens)
             new_tokens = []
             for tok in type_tokens:
                 # FIXME : shouldn't we rather QualifiedSymbol.get_type_link() ?

@@ -106,6 +106,7 @@ class GIExtension(Extension):
         self.__current_output_filename = None
         self.__class_gtype_structs = {}
         self.__default_page = DEFAULT_PAGE
+        self.__created_symbols = set()
 
     # Static vmethod implementations
 
@@ -242,7 +243,7 @@ class GIExtension(Extension):
 
     @classmethod
     def search_online_links(cls, resolver, name):
-        href = cls.__gtkdoc_hrefs.get(name)
+        href = GTKDOC_HREFS.get(name)
         if href:
             return Link(href, name, name)
         return None
@@ -298,18 +299,16 @@ class GIExtension(Extension):
 
             name = "%s.%s" % (parent_name, field_name)
 
-            if field_name_prefix:
-                print (field_name, name)
-
             type_desc = type_description_from_node(field)
             qtype = QualifiedSymbol(type_tokens=type_desc.type_tokens)
+            self.add_attrs(qtype, type_desc=type_desc)
 
             member = self.get_or_create_symbol(
                 FieldSymbol,
                 member_name=field_name, qtype=qtype,
                 filename=filename, display_name=name,
                 unique_name=name, parent_name=parent_name)
-            self.add_attrs(member, gi_name=type_desc.gi_name, in_union=in_union)
+            self.add_attrs(member, type_desc=type_desc, in_union=in_union)
             members.append(member)
 
         return members
@@ -377,7 +376,7 @@ class GIExtension(Extension):
             if isinstance(symbol, MethodSymbol) and i == 0:
                 continue
 
-            direction = param.get_extension_attribute ('gi-extension', 'direction')
+            direction = self.get_attr(param, 'direction')
 
             if direction == 'in' or direction == 'inout':
                 in_parameters.append (param)
@@ -395,7 +394,7 @@ class GIExtension(Extension):
             direction = 'in'
 
         res = ParameterSymbol(argname=param_name, type_tokens=type_desc.type_tokens)
-        self.add_attrs(res, gi_name=type_desc.gi_name, direction=direction)
+        self.add_attrs(res, type_desc=type_desc, direction=direction)
 
         return res, direction
 
@@ -406,14 +405,14 @@ class GIExtension(Extension):
             ret_item = None
         else:
             ret_item = ReturnItemSymbol(type_tokens=type_desc.type_tokens)
-
-            self.add_attrs(ret_item, gi_name=type_desc.gi_name)
+            self.add_attrs(ret_item, type_desc=type_desc)
 
         res = [ret_item]
 
         for out_param in out_parameters:
             ret_item = ReturnItemSymbol(type_tokens=out_param.input_tokens,
                     name=out_param.argname)
+            self.add_attrs(ret_item, type_desc=self.get_attr(out_param, 'type_desc'))
 
             res.append(ret_item)
 
@@ -487,12 +486,14 @@ class GIExtension(Extension):
         parent_link = Link(None, parent_name, parent_name)
 
         instance_param = ParameterSymbol(argname='self', type_tokens=[parent_link, '*'])
-        self.add_attrs (instance_param, gi_name=parent_gi_name, direction='in')
+        type_desc = SymbolTypeDesc ([], parent_gi_name, None, 0)
+        self.add_attrs (instance_param, type_desc=type_desc, direction='in')
         parameters.insert (0, instance_param)
 
         udata_link = Link(None, 'gpointer', 'gpointer')
         udata_param = ParameterSymbol(argname='user_data', type_tokens=[udata_link])
-        self.add_attrs (udata_param, gi_name='gpointer', direction='in')
+        type_desc = SymbolTypeDesc ([], 'gpointer', None, 0)
+        self.add_attrs (udata_param, type_desc=type_desc, direction='in')
         parameters.append (udata_param)
 
         res = self.get_or_create_symbol(SignalSymbol, node,
@@ -528,8 +529,7 @@ class GIExtension(Extension):
 
         type_desc = type_description_from_node(node)
         type_ = QualifiedSymbol(type_tokens=type_desc.type_tokens)
-        self.add_attrs(type_, gi_name=type_desc.gi_name,
-                                type_desc=type_desc)
+        self.add_attrs(type_, type_desc=type_desc)
 
         flags = []
         writable = node.attrib.get('writable')
@@ -786,7 +786,7 @@ class GIExtension(Extension):
     # Format-time private methods
 
     def __add_annotations (self, formatter, symbol):
-        if symbol.get_extension_attribute(self.extension_name, 'language') == 'c':
+        if self.get_attr(symbol, 'language') == 'c':
             annotations = self.__annotation_parser.make_annotations(symbol)
 
             # FIXME: OK this is format time but still seems strange
@@ -797,7 +797,10 @@ class GIExtension(Extension):
             symbol.extension_contents.pop('Annotations', None)
 
     def __formatting_symbol(self, formatter, symbol, language):
-        symbol.add_extension_attribute(self.extension_name, 'language', language)
+        if isinstance (symbol, Symbol) and symbol.unique_name == 'gst_debug_level_get_name':
+            print ('I will give my verdict here and now')
+
+        self.add_attrs(symbol, language=language)
 
         if isinstance(symbol, (ReturnItemSymbol, ParameterSymbol)):
             self.__add_annotations (formatter, symbol)
@@ -808,6 +811,8 @@ class GIExtension(Extension):
         # We discard symbols at formatting time because they might be exposed
         # in other languages
         if language != 'c':
+            if isinstance (symbol, Symbol) and symbol.unique_name == 'gst_debug_level_get_name':
+                print ("Introspectable:", is_introspectable(symbol.unique_name, language))
             return is_introspectable(symbol.unique_name, language)
 
         return True

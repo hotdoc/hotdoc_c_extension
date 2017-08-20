@@ -182,6 +182,192 @@ def type_tokens_from_cdecl(cdecl):
 
     return tokens
 
+
+def get_gi_name_components(node):
+    parent = node.getparent()
+    if 'name' in node.attrib:
+        components = [node.attrib.get('name')]
+    else:
+        components = []
+
+    while parent is not None:
+        try:
+            components.insert(0, parent.attrib['name'])
+        except KeyError:
+            break
+        parent = parent.getparent()
+    return components
+
+
+def get_klass_name(klass):
+    klass_name = klass.attrib.get('{%s}type' % NS_MAP['c'])
+    if not klass_name:
+        klass_name = klass.attrib.get('{%s}type-name' % NS_MAP['glib'])
+    return klass_name
+
+
+def get_function_name(func):
+    return func.attrib.get('{%s}identifier' % NS_MAP['c'])
+
+
+def get_structure_name(node):
+    return node.attrib[c_ns('type')]
+
+def get_symbol_names(node):
+    if node.tag in (core_ns('class')):
+        _ = get_klass_name (node)
+        return _, _, _
+    elif node.tag in (core_ns('interface')):
+        _ = get_klass_name (node)
+        return _, _, _
+    elif node.tag in (core_ns('function'), core_ns('method'), core_ns('constructor')):
+        _ = get_function_name(node)
+        return _, _, _
+    elif node.tag == core_ns('virtual-method'):
+        klass_node = node.getparent()
+        ns = klass_node.getparent()
+        klass_structure_node = ns.xpath(
+            './*[@glib:is-gtype-struct-for="%s"]' % klass_node.attrib['name'],
+            namespaces=NS_MAP)[0]
+        parent_name = get_structure_name(klass_structure_node)
+        name = node.attrib['name']
+        unique_name = '%s::%s' % (parent_name, name)
+        return unique_name, name, unique_name
+    elif node.tag == core_ns('field'):
+        structure_node = node.getparent()
+        parent_name = get_structure_name(structure_node)
+        name = node.attrib['name']
+        unique_name = '%s::%s' % (parent_name, name)
+        return unique_name, name, unique_name
+    elif node.tag == core_ns('property'):
+        parent_name = get_klass_name(node.getparent())
+        klass_name = '%s::%s' % (parent_name, parent_name)
+        name = node.attrib['name']
+        unique_name = '%s:%s' % (parent_name, name)
+        return unique_name, name, klass_name
+    elif node.tag == glib_ns('signal'):
+        parent_name = get_klass_name(node.getparent())
+        klass_name = '%s::%s' % (parent_name, parent_name)
+        name = node.attrib['name']
+        unique_name = '%s::%s' % (parent_name, name)
+        return unique_name, name, klass_name
+    elif node.tag == core_ns('alias'):
+        _ = node.attrib.get(c_ns('type'))
+        return _, _, _
+    elif node.tag == core_ns('record'):
+        _ = get_structure_name(node)
+        return _, _, _
+    elif node.tag in (core_ns('enumeration'), core_ns('bitfield')):
+        _ = node.attrib[c_ns('type')]
+        return _, _, _
+
+    return None, None, None
+
+
+# This in order to prioritize gir sources from all subprojects
+ALL_GIRS = {}
+
+# Avoid parsing gir files multiple times
+PARSED_GIRS = set()
+
+
+def find_gir_file(gir_name, datadir):
+    if gir_name in ALL_GIRS:
+        return ALL_GIRS[gir_name]
+
+    xdg_dirs = os.getenv('XDG_DATA_DIRS') or ''
+    xdg_dirs = [p for p in xdg_dirs.split(':') if p]
+    xdg_dirs.append(datadir)
+    for dir_ in xdg_dirs:
+        gir_file = os.path.join(dir_, 'gir-1.0', gir_name)
+        if os.path.exists(gir_file):
+            return gir_file
+    return None
+
+# Boilerplate GObject macros we don't want to expose
+SMART_FILTERS = set()
+
+def generate_smart_filters(id_prefixes, sym_prefixes, node):
+    sym_prefix = node.attrib['{%s}symbol-prefix' % NS_MAP['c']]
+    SMART_FILTERS.add(('%s_IS_%s' % (sym_prefixes, sym_prefix)).upper())
+    SMART_FILTERS.add(('%s_TYPE_%s' % (sym_prefixes, sym_prefix)).upper())
+    SMART_FILTERS.add(('%s_%s' % (sym_prefixes, sym_prefix)).upper())
+    SMART_FILTERS.add(('%s_%s_CLASS' % (sym_prefixes, sym_prefix)).upper())
+    SMART_FILTERS.add(('%s_IS_%s_CLASS' % (sym_prefixes, sym_prefix)).upper())
+    SMART_FILTERS.add(('%s_%s_GET_CLASS' % (sym_prefixes, sym_prefix)).upper())
+    SMART_FILTERS.add(('%s_%s_GET_IFACE' % (sym_prefixes, sym_prefix)).upper())
+
+
+NODE_CACHE = {}
+# We need to collect all class nodes and build the
+# hierarchy beforehand, because git class nodes do not
+# know about their children
+CLASS_NODES = {}
+
+
+def cache_nodes(gir_root, datadir):
+    ns_node = gir_root.find('./{%s}namespace' % NS_MAP['core'])
+    id_prefixes = ns_node.attrib['{%s}identifier-prefixes' % NS_MAP['c']]
+    sym_prefixes = ns_node.attrib['{%s}symbol-prefixes' % NS_MAP['c']]
+
+    id_key = '{%s}identifier' % NS_MAP['c']
+    for node in gir_root.xpath(
+            './/*[@c:identifier]',
+            namespaces=NS_MAP):
+        NODE_CACHE[node.attrib[id_key]] = node
+
+    id_type = '{%s}type' % NS_MAP['c']
+    class_tag = '{%s}class' % NS_MAP['core']
+    interface_tag = '{%s}interface' % NS_MAP['core']
+    for node in gir_root.xpath(
+            './/*[not(self::core:type) and not (self::core:array)][@c:type]',
+            namespaces=NS_MAP):
+        name = node.attrib[id_type]
+        NODE_CACHE[name] = node
+        if node.tag in [class_tag, interface_tag]:
+            gi_name = '.'.join(get_gi_name_components(node))
+            CLASS_NODES[gi_name] = node
+            NODE_CACHE['%s::%s' % (name, name)] = node
+            generate_smart_filters(id_prefixes, sym_prefixes, node)
+
+    for node in gir_root.xpath(
+            './/core:property',
+            namespaces=NS_MAP):
+        name = '%s:%s' % (get_klass_name(node.getparent()),
+                          node.attrib['name'])
+        NODE_CACHE[name] = node
+
+    for node in gir_root.xpath(
+            './/glib:signal',
+            namespaces=NS_MAP):
+        name = '%s::%s' % (get_klass_name(node.getparent()),
+                           node.attrib['name'])
+        NODE_CACHE[name] = node
+
+    for node in gir_root.xpath(
+            './/core:virtual-method',
+            namespaces=NS_MAP):
+        name = get_symbol_names(node)[0]
+        NODE_CACHE[name] = node
+
+    for inc in gir_root.findall('./core:include',
+            namespaces = NS_MAP):
+        inc_name = inc.attrib["name"]
+        inc_version = inc.attrib["version"]
+        gir_file = find_gir_file('%s-%s.gir' % (inc_name, inc_version), datadir)
+        if not gir_file:
+            warn('missing-gir-include', "Couldn't find a gir for %s-%s.gir" %
+                    (inc_name, inc_version))
+            continue
+
+        if gir_file in PARSED_GIRS:
+            continue
+
+        PARSED_GIRS.add(gir_file)
+        inc_gir_root = etree.parse(gir_file).getroot()
+        cache_nodes(inc_gir_root, datadir)
+
+
 DEFAULT_PAGE = "Miscellaneous.default_page"
 DEFAULT_PAGE_COMMENT = """/**
 * Miscellaneous.default_page:
@@ -206,22 +392,13 @@ class GIExtension(Extension):
     __gathered_gtk_doc_links = False
     __gtkdoc_hrefs = {}
 
-    # Caches are shared between all instances
-    __node_cache = {}
-    __parsed_girs = set()
     __translated_names = {l: {} for l in OUTPUT_LANGUAGES}
     __aliased_links = {l: {} for l in OUTPUT_LANGUAGES}
-    # We need to collect all class nodes and build the
-    # hierarchy beforehand, because git class nodes do not
-    # know about their children
-    __class_nodes = {}
 
     def __init__(self, app, project):
         Extension.__init__(self, app, project)
 
         self.languages = None
-
-        self.__smart_filters = set()
 
         self.__gir_hierarchies = {}
         self.__gir_children_map = defaultdict(dict)
@@ -246,6 +423,7 @@ class GIExtension(Extension):
 
     def parse_config(self, config):
         super(GIExtension, self).parse_config(config)
+        ALL_GIRS.update ({os.path.basename(s): s for s in self.sources})
         self.c_sources = config.get_sources('gi-c')
         self.languages = [l.lower() for l in config.get(
             'languages', [])]
@@ -257,7 +435,7 @@ class GIExtension(Extension):
             self.languages = OUTPUT_LANGUAGES
         for gir_file in self.sources:
             gir_root = etree.parse(gir_file).getroot()
-            self.__cache_nodes(gir_root, self.__node_cache)
+            cache_nodes(gir_root, self.project.datadir)
         self.__create_hierarchies()
 
     def _make_formatter(self):
@@ -294,7 +472,7 @@ class GIExtension(Extension):
         self.app.database.add_comment(block)
 
         stale_c, unlisted = self.get_stale_files(self.c_sources)
-        CCommentExtractor(self, comment_parser).parse_comments(stale_c, self.__smart_filters)
+        CCommentExtractor(self, comment_parser).parse_comments(stale_c, SMART_FILTERS)
 
     def format_page(self, page, link_resolver, output):
         link_resolver.get_link_signal.connect(self.search_online_links)
@@ -341,59 +519,6 @@ class GIExtension(Extension):
 
     def __core_ns(self, tag):
         return '{%s}%s' % tag, NS_MAP['core']
-
-    def __get_structure_name(self, node):
-        return node.attrib[c_ns('type')]
-
-    def __get_symbol_names(self, node):
-        if node.tag in (core_ns('class')):
-            _ = self.__get_klass_name (node)
-            return _, _, _
-        elif node.tag in (core_ns('interface')):
-            _ = self.__get_klass_name (node)
-            return _, _, _
-        elif node.tag in (core_ns('function'), core_ns('method'), core_ns('constructor')):
-            _ = self.__get_function_name(node)
-            return _, _, _
-        elif node.tag == core_ns('virtual-method'):
-            klass_node = node.getparent()
-            ns = klass_node.getparent()
-            klass_structure_node = ns.xpath(
-                './*[@glib:is-gtype-struct-for="%s"]' % klass_node.attrib['name'],
-                namespaces=NS_MAP)[0]
-            parent_name = self.__get_structure_name(klass_structure_node)
-            name = node.attrib['name']
-            unique_name = '%s::%s' % (parent_name, name)
-            return unique_name, name, unique_name
-        elif node.tag == core_ns('field'):
-            structure_node = node.getparent()
-            parent_name = self.__get_structure_name(structure_node)
-            name = node.attrib['name']
-            unique_name = '%s::%s' % (parent_name, name)
-            return unique_name, name, unique_name
-        elif node.tag == core_ns('property'):
-            parent_name = self.__get_klass_name(node.getparent())
-            klass_name = '%s::%s' % (parent_name, parent_name)
-            name = node.attrib['name']
-            unique_name = '%s:%s' % (parent_name, name)
-            return unique_name, name, klass_name
-        elif node.tag == glib_ns('signal'):
-            parent_name = self.__get_klass_name(node.getparent())
-            klass_name = '%s::%s' % (parent_name, parent_name)
-            name = node.attrib['name']
-            unique_name = '%s::%s' % (parent_name, name)
-            return unique_name, name, klass_name
-        elif node.tag == core_ns('alias'):
-            _ = node.attrib.get(c_ns('type'))
-            return _, _, _
-        elif node.tag == core_ns('record'):
-            _ = self.__get_structure_name(node)
-            return _, _, _
-        elif node.tag in (core_ns('enumeration'), core_ns('bitfield')):
-            _ = node.attrib[c_ns('type')]
-            return _, _, _
-
-        return None, None, None
 
     def __scan_node(self, node, parent_name=None):
         gi_name = self.__get_gi_name (node)
@@ -484,7 +609,7 @@ class GIExtension(Extension):
 
         filenames = []
         for cnode in node:
-            cunique_name = self.__get_symbol_names(cnode)[0]
+            cunique_name = get_symbol_names(cnode)[0]
             if not cunique_name:
                 continue
             fname = self.__get_symbol_filename(cunique_name)
@@ -504,7 +629,7 @@ class GIExtension(Extension):
                 nextnode_classfor = nextnode.attrib.get(glib_ns(
                     'is-gtype-struct-for'))
                 if nextnode_classfor == name:
-                    nunique_name = self.__get_symbol_names(nextnode)[0]
+                    nunique_name = get_symbol_names(nextnode)[0]
                     filename = self.__get_symbol_filename(nunique_name)
 
             if filename == self.__default_page:
@@ -527,103 +652,10 @@ class GIExtension(Extension):
 
         return filename
 
-    def __find_gir_file(self, gir_name):
-        for source in self.sources:
-            if os.path.basename(source) == gir_name:
-                return source
-
-        xdg_dirs = os.getenv('XDG_DATA_DIRS') or ''
-        xdg_dirs = [p for p in xdg_dirs.split(':') if p]
-        xdg_dirs.append(self.project.datadir)
-        for dir_ in xdg_dirs:
-            gir_file = os.path.join(dir_, 'gir-1.0', gir_name)
-            if os.path.exists(gir_file):
-                return gir_file
-        return None
-
-    def __generate_smart_filters(self, id_prefixes, sym_prefixes, node):
-        sym_prefix = node.attrib['{%s}symbol-prefix' % NS_MAP['c']]
-        self.__smart_filters.add(('%s_IS_%s' % (sym_prefixes, sym_prefix)).upper())
-        self.__smart_filters.add(('%s_TYPE_%s' % (sym_prefixes, sym_prefix)).upper())
-        self.__smart_filters.add(('%s_%s' % (sym_prefixes, sym_prefix)).upper())
-        self.__smart_filters.add(('%s_%s_CLASS' % (sym_prefixes, sym_prefix)).upper())
-        self.__smart_filters.add(('%s_IS_%s_CLASS' % (sym_prefixes, sym_prefix)).upper())
-        self.__smart_filters.add(('%s_%s_GET_CLASS' % (sym_prefixes, sym_prefix)).upper())
-        self.__smart_filters.add(('%s_%s_GET_IFACE' % (sym_prefixes, sym_prefix)).upper())
-
-    def __cache_nodes(self, gir_root, node_cache):
-        ns_node = gir_root.find('./{%s}namespace' % NS_MAP['core'])
-        id_prefixes = ns_node.attrib['{%s}identifier-prefixes' % NS_MAP['c']]
-        sym_prefixes = ns_node.attrib['{%s}symbol-prefixes' % NS_MAP['c']]
-
-        id_key = '{%s}identifier' % NS_MAP['c']
-        for node in gir_root.xpath(
-                './/*[@c:identifier]',
-                namespaces=NS_MAP):
-            node_cache[node.attrib[id_key]] = node
-
-        id_type = '{%s}type' % NS_MAP['c']
-        class_tag = '{%s}class' % NS_MAP['core']
-        interface_tag = '{%s}interface' % NS_MAP['core']
-        for node in gir_root.xpath(
-                './/*[not(self::core:type) and not (self::core:array)][@c:type]',
-                namespaces=NS_MAP):
-            name = node.attrib[id_type]
-            node_cache[name] = node
-            if node.tag in [class_tag, interface_tag]:
-                gi_name = '.'.join(self.__get_gi_name_components(node))
-                self.__class_nodes[gi_name] = node
-                node_cache['%s::%s' % (name, name)] = node
-                self.__generate_smart_filters(id_prefixes, sym_prefixes, node)
-
-        for node in gir_root.xpath(
-                './/core:property',
-                namespaces=NS_MAP):
-            name = '%s:%s' % (self.__get_klass_name(node.getparent()),
-                              node.attrib['name'])
-            node_cache[name] = node
-
-        for node in gir_root.xpath(
-                './/glib:signal',
-                namespaces=NS_MAP):
-            name = '%s::%s' % (self.__get_klass_name(node.getparent()),
-                               node.attrib['name'])
-            node_cache[name] = node
-
-        for node in gir_root.xpath(
-                './/core:virtual-method',
-                namespaces=NS_MAP):
-            name = self.__get_symbol_names(node)[0]
-            node_cache[name] = node
-
-        for inc in gir_root.findall('./core:include',
-                namespaces = NS_MAP):
-            inc_name = inc.attrib["name"]
-            inc_version = inc.attrib["version"]
-            gir_file = self.__find_gir_file('%s-%s.gir' % (inc_name,
-                inc_version))
-            if not gir_file:
-                warn('missing-gir-include', "Couldn't find a gir for %s-%s.gir" %
-                        (inc_name, inc_version))
-                continue
-
-            if gir_file in self.__parsed_girs:
-                continue
-
-            self.__parsed_girs.add(gir_file)
-            inc_gir_root = etree.parse(gir_file).getroot()
-            self.__cache_nodes(inc_gir_root, node_cache)
-
     def __create_hierarchies(self):
-        for gi_name, klass in self.__class_nodes.items():
+        for gi_name, klass in CLASS_NODES.items():
             hierarchy = self.__create_hierarchy (klass)
             self.__gir_hierarchies[gi_name] = hierarchy
-
-    def __get_klass_name(self, klass):
-        klass_name = klass.attrib.get('{%s}type' % NS_MAP['c'])
-        if not klass_name:
-            klass_name = klass.attrib.get('{%s}type-name' % NS_MAP['glib'])
-        return klass_name
 
     def __create_hierarchy (self, klass):
         klaass = klass
@@ -636,9 +668,9 @@ class GIExtension(Extension):
             if not '.' in parent_name:
                 namespace = klass.getparent().attrib['name']
                 parent_name = '%s.%s' % (namespace, parent_name)
-            parent_class = self.__class_nodes[parent_name]
+            parent_class = CLASS_NODES[parent_name]
             children = self.__gir_children_map[parent_name]
-            klass_name = self.__get_klass_name (klass)
+            klass_name = get_klass_name (klass)
 
             if not klass_name in children:
                 link = Link(None, klass_name, klass_name)
@@ -646,7 +678,7 @@ class GIExtension(Extension):
                 self.__add_symbol_attrs(sym, owner_name=klass_name)
                 children[klass_name] = sym
 
-            klass_name = self.__get_klass_name(parent_class)
+            klass_name = get_klass_name(parent_class)
             link = Link(None, klass_name, klass_name)
             sym = QualifiedSymbol(type_tokens=[link])
             self.__add_symbol_attrs(sym, owner_name=klass_name)
@@ -756,7 +788,7 @@ class GIExtension(Extension):
         if name in FUNDAMENTALS[language]:
             return True
 
-        node = self.__node_cache.get(name)
+        node = NODE_CACHE.get(name)
 
         if node is None:
             return False
@@ -885,18 +917,18 @@ class GIExtension(Extension):
         res = super(GIExtension, self).get_or_create_symbol(*args, **kwargs)
 
         if node is not None and res:
-            self.__node_cache[res.unique_name] = node
+            NODE_CACHE[res.unique_name] = node
             for alias in aliases:
-                self.__node_cache[alias] = node
+                NODE_CACHE[alias] = node
 
         return res
 
     def __get_gir_type (self, cur_ns, name):
         namespaced = '%s.%s' % (cur_ns, name)
-        klass = self.__class_nodes.get (namespaced)
+        klass = CLASS_NODES.get (namespaced)
         if klass is not None:
             return klass
-        return self.__class_nodes.get (name)
+        return CLASS_NODES.get (name)
 
     def __type_tokens_from_gitype (self, cur_ns, ptype_name):
         qs = None
@@ -935,7 +967,7 @@ class GIExtension(Extension):
             type_tokens = self.__type_tokens_from_gitype (cur_ns, gi_name)
 
         namespaced = '%s.%s' % (cur_ns, gi_name)
-        if namespaced in self.__class_nodes:
+        if namespaced in CLASS_NODES:
             gi_name = namespaced
 
         return SymbolTypeDesc(type_tokens, gi_name, ctype_name, array_nesting)
@@ -1026,11 +1058,11 @@ class GIExtension(Extension):
         self.__add_symbol_attrs(symbol, parameters=in_parameters)
 
     def __get_gi_name (self, node):
-        components = self.__get_gi_name_components(node)
+        components = get_gi_name_components(node)
         return '.'.join(components)
 
     def __create_signal_symbol (self, node, parent_name):
-        unique_name, name, klass_name = self.__get_symbol_names(node)
+        unique_name, name, klass_name = get_symbol_names(node)
 
         parameters, retval = self.__create_parameters_and_retval (node,
                                                                   unique_name)
@@ -1079,7 +1111,7 @@ class GIExtension(Extension):
         return res
 
     def __create_property_symbol (self, node, parent_name):
-        unique_name, name, klass_name = self.__get_symbol_names(node)
+        unique_name, name, klass_name = get_symbol_names(node)
 
         type_desc = self.__type_description_from_node(node)
         type_ = QualifiedSymbol(type_tokens=type_desc.type_tokens)
@@ -1120,7 +1152,7 @@ class GIExtension(Extension):
         klass_comment = self.app.database.get_comment('%s%s' %
             (ns.attrib['name'], gtype_struct))
 
-        unique_name, name, klass_name = self.__get_symbol_names(node)
+        unique_name, name, klass_name = get_symbol_names(node)
 
         if klass_comment:
             param_comment = klass_comment.params.get(name)
@@ -1155,7 +1187,7 @@ class GIExtension(Extension):
         return self.__default_page
 
     def __create_alias_symbol (self, node, gi_name, parent_name):
-        name = self.__get_symbol_names(node)[0]
+        name = get_symbol_names(node)[0]
 
         type_desc = self.__type_description_from_node(node)
         aliased_type = QualifiedSymbol(type_tokens=type_desc.type_tokens)
@@ -1185,7 +1217,7 @@ class GIExtension(Extension):
                        'object class' % (node.attrib['name']))
             return
 
-        unique_name, unused_name, klass_name = self.__get_symbol_names(node)
+        unique_name, unused_name, klass_name = get_symbol_names(node)
         # Hidding class private structures
         if node.attrib.get('disguised') == '1' and \
                 unique_name.endswith(('Priv', 'Private')):
@@ -1384,26 +1416,11 @@ class GIExtension(Extension):
                 unique_name=unique_name,
                 filename=filename)
 
-    def __get_gi_name_components(self, node):
-        parent = node.getparent()
-        if 'name' in node.attrib:
-            components = [node.attrib.get('name')]
-        else:
-            components = []
-
-        while parent is not None:
-            try:
-                components.insert(0, parent.attrib['name'])
-            except KeyError:
-                break
-            parent = parent.getparent()
-        return components
-
     def __add_translations(self, unique_name, node):
         id_key = '{%s}identifier' % NS_MAP['c']
         id_type = '{%s}type' % NS_MAP['c']
 
-        components = self.__get_gi_name_components(node)
+        components = get_gi_name_components(node)
         gi_name = '.'.join(components)
 
         if id_key in node.attrib:
@@ -1418,11 +1435,8 @@ class GIExtension(Extension):
 
         return components, gi_name
 
-    def __get_function_name(self, func):
-        return func.attrib.get('{%s}identifier' % NS_MAP['c'])
-
     def __create_function_symbol (self, node, parent_name):
-        name = self.__get_symbol_names(node)[0]
+        name = get_symbol_names(node)[0]
 
         self.__add_translations(name, node)
 

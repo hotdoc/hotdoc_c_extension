@@ -533,6 +533,23 @@ def add_translations(unique_name, node):
     return components, gi_name
 
 
+def is_introspectable(name, language):
+    if name in FUNDAMENTALS[language]:
+        return True
+
+    node = NODE_CACHE.get(name)
+
+    if node is None:
+        return False
+
+    if not name in TRANSLATED_NAMES['c']:
+        add_translations(name, node)
+
+    if node.attrib.get('introspectable') == '0':
+        return False
+
+    return True
+
 
 ALIASED_LINKS = {l: {} for l in OUTPUT_LANGUAGES}
 
@@ -850,23 +867,6 @@ class GIExtension(Extension):
         else:
             symbol.extension_contents.pop('Annotations', None)
 
-    def __is_introspectable(self, name, language):
-        if name in FUNDAMENTALS[language]:
-            return True
-
-        node = NODE_CACHE.get(name)
-
-        if node is None:
-            return False
-
-        if not name in TRANSLATED_NAMES['c']:
-            add_translations(name, node)
-
-        if node.attrib.get('introspectable') == '0':
-            return False
-
-        return True
-
     def __formatting_symbol(self, formatter, symbol, language):
         symbol.add_extension_attribute(self.extension_name, 'language', language)
 
@@ -879,7 +879,7 @@ class GIExtension(Extension):
         # We discard symbols at formatting time because they might be exposed
         # in other languages
         if language != 'c':
-            return self.__is_introspectable(symbol.unique_name, language)
+            return is_introspectable(symbol.unique_name, language)
 
         return True
 
@@ -905,7 +905,7 @@ class GIExtension(Extension):
                 return None
 
             project = self.project.get_project_for_page (page)
-            if link.ref and language != 'c' and not self.__is_introspectable(link.id_, language):
+            if link.ref and language != 'c' and not is_introspectable(link.id_, language):
                 return self.insert_language(link.ref, 'c', project)
 
             res = self.insert_language(link.ref, language, project)
@@ -928,7 +928,7 @@ class GIExtension(Extension):
         if fund:
             return fund._title
 
-        if language != 'c' and not self.__is_introspectable(link.id_, language):
+        if language != 'c' and not is_introspectable(link.id_, language):
             return link._title + ' (not introspectable)'
 
         aliased_link = ALIASED_LINKS[language].get(link.id_)

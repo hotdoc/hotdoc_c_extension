@@ -105,5 +105,6 @@ setup(
     install_requires = [
         'pkgconfig==1.1.0',
         'cchardet',
+        'networkx==1.11'
     ]
 )

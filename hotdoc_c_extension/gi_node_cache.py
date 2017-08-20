@@ -1,6 +1,8 @@
 import os
+from collections import defaultdict
 from lxml import etree
-
+import networkx as nx
+from hotdoc.core.symbols import QualifiedSymbol
 from hotdoc_c_extension.gi_utils import *
 
 
@@ -17,11 +19,12 @@ def generate_smart_filters(id_prefixes, sym_prefixes, node):
     SMART_FILTERS.add(('%s_%s_GET_CLASS' % (sym_prefixes, sym_prefix)).upper())
     SMART_FILTERS.add(('%s_%s_GET_IFACE' % (sym_prefixes, sym_prefix)).upper())
 
-NODE_CACHE = {}
-# We need to collect all class nodes and build the
-# hierarchy beforehand, because git class nodes do not
-# know about their children
-CLASS_NODES = {}
+
+HIERARCHY_GRAPH = nx.DiGraph()
+
+
+ALL_GI_TYPES = {}
+
 
 # Avoid parsing gir files multiple times
 PARSED_GIRS = set()
@@ -39,6 +42,78 @@ def find_gir_file(gir_name, all_girs):
             return gir_file
     return None
 
+
+TRANSLATED_NAMES = {l: {} for l in OUTPUT_LANGUAGES}
+
+
+NON_INTROSPECTABLE_SYMBOLS = set()
+
+
+def translate(unique_name, node):
+    components = get_gi_name_components(node)
+    gi_name = '.'.join(components)
+
+    if c_ns('identifier') in node.attrib:
+        TRANSLATED_NAMES['python'][unique_name] = gi_name
+        components[-1] = 'prototype.%s' % components[-1]
+        TRANSLATED_NAMES['javascript'][unique_name] = '.'.join(components)
+        TRANSLATED_NAMES['c'][unique_name] = unique_name
+    elif c_ns('type') in node.attrib:
+        TRANSLATED_NAMES['python'][unique_name] = gi_name
+        TRANSLATED_NAMES['javascript'][unique_name] = gi_name
+        TRANSLATED_NAMES['c'][unique_name] = unique_name
+    else:
+        TRANSLATED_NAMES['python'][unique_name] = node.attrib.get('name')
+        TRANSLATED_NAMES['javascript'][unique_name] = node.attrib.get('name')
+        TRANSLATED_NAMES['c'][unique_name] = node.attrib.get('name')
+
+    if node.attrib.get('introspectable') == '0':
+        NON_INTROSPECTABLE_SYMBOLS.add(unique_name)
+
+def append(unique_name, node):
+    translate (unique_name, node)
+
+
+def update_hierarchies(cur_ns, node):
+    gi_name = '.'.join(get_gi_name_components(node))
+    ALL_GI_TYPES[gi_name] = get_klass_name(node)
+    parent_name = node.attrib.get('parent')
+    if not parent_name:
+        return
+
+    if not '.' in parent_name:
+        parent_name = '%s.%s' % (cur_ns, parent_name)
+
+    HIERARCHY_GRAPH.add_edge(parent_name, gi_name)
+
+
+def get_parent_link(gi_name, res):
+    parents = HIERARCHY_GRAPH.predecessors(gi_name)
+    if parents:
+        get_parent_link(parents[0], res)
+    ctype_name = ALL_GI_TYPES[gi_name]
+    qs = QualifiedSymbol(type_tokens=[Link(None, ctype_name, ctype_name)])
+    res.append(qs)
+
+
+def get_parents_hierarchy(gi_name):
+    res = []
+    parents = HIERARCHY_GRAPH.predecessors(gi_name)
+    if not parents:
+        return []
+    get_parent_link(parents[0], res)
+    return res
+
+
+def get_children(gi_name):
+    res = {}
+    children = HIERARCHY_GRAPH.successors(gi_name)
+    for gi_name in children:
+        ctype_name = ALL_GI_TYPES[gi_name]
+        res[ctype_name] = QualifiedSymbol(type_tokens=[Link(None, ctype_name, ctype_name)])
+    return res
+
+
 def cache_nodes(gir_root, all_girs):
     ns_node = gir_root.find('./{%s}namespace' % NS_MAP['core'])
     id_prefixes = ns_node.attrib['{%s}identifier-prefixes' % NS_MAP['c']]
@@ -48,7 +123,7 @@ def cache_nodes(gir_root, all_girs):
     for node in gir_root.xpath(
             './/*[@c:identifier]',
             namespaces=NS_MAP):
-        NODE_CACHE[node.attrib[id_key]] = node
+        append (node.attrib[id_key], node)
 
     id_type = '{%s}type' % NS_MAP['c']
     class_tag = '{%s}class' % NS_MAP['core']
@@ -57,11 +132,10 @@ def cache_nodes(gir_root, all_girs):
             './/*[not(self::core:type) and not (self::core:array)][@c:type]',
             namespaces=NS_MAP):
         name = node.attrib[id_type]
-        NODE_CACHE[name] = node
+        append (name, node)
         if node.tag in [class_tag, interface_tag]:
-            gi_name = '.'.join(get_gi_name_components(node))
-            CLASS_NODES[gi_name] = node
-            NODE_CACHE['%s::%s' % (name, name)] = node
+            update_hierarchies (ns_node.attrib.get('name'), node)
+            append('%s::%s' % (name, name), node)
             generate_smart_filters(id_prefixes, sym_prefixes, node)
 
     for node in gir_root.xpath(
@@ -69,20 +143,20 @@ def cache_nodes(gir_root, all_girs):
             namespaces=NS_MAP):
         name = '%s:%s' % (get_klass_name(node.getparent()),
                           node.attrib['name'])
-        NODE_CACHE[name] = node
+        append (name, node)
 
     for node in gir_root.xpath(
             './/glib:signal',
             namespaces=NS_MAP):
         name = '%s::%s' % (get_klass_name(node.getparent()),
                            node.attrib['name'])
-        NODE_CACHE[name] = node
+        append (name, node)
 
     for node in gir_root.xpath(
             './/core:virtual-method',
             namespaces=NS_MAP):
         name = get_symbol_names(node)[0]
-        NODE_CACHE[name] = node
+        append (name, node)
 
     for inc in gir_root.findall('./core:include',
             namespaces = NS_MAP):
@@ -100,3 +174,4 @@ def cache_nodes(gir_root, all_girs):
         PARSED_GIRS.add(gir_file)
         inc_gir_root = etree.parse(gir_file).getroot()
         cache_nodes(inc_gir_root, all_girs)
+        del inc_gir_root

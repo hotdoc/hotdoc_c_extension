@@ -87,6 +87,16 @@ UNKNOWN_TYPE = \
 '''
 
 
+GI_TYPE = \
+'''
+<method name="list_greets" c:identifier="test_greeter_list_greets">
+  <return-value>
+    <type name="GObject.Object"/>
+  </return-value>
+</method>
+'''
+
+
 
 class TestGIExtension(unittest.TestCase):
     def assertRetvalTypesEqual(self, symbol_string, ctype_name, gi_name, array_nesting):
@@ -108,8 +118,11 @@ class TestGIExtension(unittest.TestCase):
     def test_none_type(self):
         self.assertRetvalTypesEqual(NONE_TYPE, 'void', 'none', 0)
 
-    def test_none_type(self):
-        self.assertRetvalTypesEqual(UNKNOWN_TYPE, 'void*', 'object', 0)
+    def test_unknown_type(self):
+        self.assertRetvalTypesEqual(UNKNOWN_TYPE, None, 'object', 0)
+
+    def test_gi_type(self):
+        self.assertRetvalTypesEqual(GI_TYPE, None, 'GObject.Object', 0)
 
     def test_varargs_type(self):
         test_data = GIR_TEMPLATE % VARARGS_TYPE

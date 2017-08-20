@@ -15,6 +15,9 @@ else:
     DATADIR = "/usr/share"
 
 
+OUTPUT_LANGUAGES = ['c', 'python', 'javascript']
+
+
 def core_ns(tag):
     return '{http://www.gtk.org/introspection/core/1.0}%s' % tag
 
@@ -124,7 +127,7 @@ def unnest_type (node):
     type_ = node.find(core_ns('array'))
     if type_ is None:
         type_ = node.find(core_ns('type'))
-    ctype_name = type_.attrib.get(c_ns('type'), 'void*')
+    ctype_name = type_.attrib.get(c_ns('type'), None)
 
     while type_.tag == core_ns('array') or type_.attrib.get('name') == 'GLib.List':
         subtype_ = type_.find(core_ns('array'))

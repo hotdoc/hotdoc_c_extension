@@ -67,12 +67,6 @@ Must be used in combination with the C extension.
 ALL_GIRS = {}
 
 
-OUTPUT_LANGUAGES = ['c', 'python', 'javascript']
-
-
-TRANSLATED_NAMES = {l: {} for l in OUTPUT_LANGUAGES}
-
-
 ALIASED_LINKS = {l: {} for l in OUTPUT_LANGUAGES}
 
 
@@ -101,24 +95,14 @@ SymbolTypeDesc = namedtuple('SymbolTypeDesc', [
     'type_tokens', 'gi_name', 'c_name', 'nesting_depth'])
 
 
-def get_gir_type (cur_ns, name):
-    namespaced = '%s.%s' % (cur_ns, name)
-    klass = CLASS_NODES.get (namespaced)
-    if klass is not None:
-        return klass
-    return CLASS_NODES.get (name)
-
-
 def type_tokens_from_gitype (cur_ns, ptype_name):
     qs = None
 
     if ptype_name == 'none':
         return None
 
-    gitype = get_gir_type (cur_ns, ptype_name)
-    if gitype is not None:
-        c_type = gitype.attrib['{http://www.gtk.org/introspection/c/1.0}type']
-        ptype_name = c_type
+    namespaced = '%s.%s' % (cur_ns, ptype_name)
+    ptype_name = ALL_GI_TYPES.get(namespaced) or ALL_GI_TYPES.get(ptype_name) or ptype_name
 
     type_link = Link (None, ptype_name, ptype_name)
 
@@ -139,45 +123,20 @@ def type_description_from_node(gi_node):
         type_tokens = type_tokens_from_gitype (cur_ns, gi_name)
 
     namespaced = '%s.%s' % (cur_ns, gi_name)
-    if namespaced in CLASS_NODES:
+    if namespaced in ALL_GI_TYPES:
         gi_name = namespaced
 
     return SymbolTypeDesc(type_tokens, gi_name, ctype_name, array_nesting)
-
-
-def add_translations(unique_name, node):
-    id_key = '{%s}identifier' % NS_MAP['c']
-    id_type = '{%s}type' % NS_MAP['c']
-
-    components = get_gi_name_components(node)
-    gi_name = '.'.join(components)
-
-    if id_key in node.attrib:
-        TRANSLATED_NAMES['python'][unique_name] = gi_name
-        components[-1] = 'prototype.%s' % components[-1]
-        TRANSLATED_NAMES['javascript'][unique_name] = '.'.join(components)
-        TRANSLATED_NAMES['c'][unique_name] = unique_name
-    elif id_type in node.attrib:
-        TRANSLATED_NAMES['python'][unique_name] = gi_name
-        TRANSLATED_NAMES['javascript'][unique_name] = gi_name
-        TRANSLATED_NAMES['c'][unique_name] = unique_name
-
-    return components, gi_name
 
 
 def is_introspectable(name, language):
     if name in FUNDAMENTALS[language]:
         return True
 
-    node = NODE_CACHE.get(name)
-
-    if node is None:
+    if name not in TRANSLATED_NAMES[language]:
         return False
 
-    if not name in TRANSLATED_NAMES['c']:
-        add_translations(name, node)
-
-    if node.attrib.get('introspectable') == '0':
+    if name in NON_INTROSPECTABLE_SYMBOLS:
         return False
 
     return True
@@ -192,8 +151,6 @@ class GIExtension(Extension):
 
         self.languages = None
 
-        self.__gir_hierarchies = {}
-        self.__gir_children_map = defaultdict(dict)
         self.__annotation_parser = GIAnnotationParser()
         self.__current_output_filename = None
         self.__class_gtype_structs = {}
@@ -234,7 +191,7 @@ class GIExtension(Extension):
         for gir_file in self.sources:
             gir_root = etree.parse(gir_file).getroot()
             cache_nodes(gir_root, ALL_GIRS)
-        self.__create_hierarchies()
+            del gir_root
 
     def setup (self):
         commonprefix = os.path.commonprefix(list(self._get_all_sources()))
@@ -307,9 +264,9 @@ class GIExtension(Extension):
         res = super(GIExtension, self).get_or_create_symbol(*args, **kwargs)
 
         if node is not None and res:
-            NODE_CACHE[res.unique_name] = node
+            translate(res.unique_name, node)
             for alias in aliases:
-                NODE_CACHE[alias] = node
+                translate(alias, node)
 
         return res
 
@@ -340,45 +297,6 @@ class GIExtension(Extension):
         if href:
             return Link(href, name, name)
         return None
-
-    # parse_config-time private methods
-
-    def __create_hierarchies(self):
-        for gi_name, klass in CLASS_NODES.items():
-            hierarchy = self.__create_hierarchy (klass)
-            self.__gir_hierarchies[gi_name] = hierarchy
-
-    def __create_hierarchy (self, klass):
-        klaass = klass
-        hierarchy = []
-        while (True):
-            parent_name = klass.attrib.get('parent')
-            if not parent_name:
-                break
-
-            if not '.' in parent_name:
-                namespace = klass.getparent().attrib['name']
-                parent_name = '%s.%s' % (namespace, parent_name)
-            parent_class = CLASS_NODES[parent_name]
-            children = self.__gir_children_map[parent_name]
-            klass_name = get_klass_name (klass)
-
-            if not klass_name in children:
-                link = Link(None, klass_name, klass_name)
-                sym = QualifiedSymbol(type_tokens=[link])
-                self.add_attrs(sym, owner_name=klass_name)
-                children[klass_name] = sym
-
-            klass_name = get_klass_name(parent_class)
-            link = Link(None, klass_name, klass_name)
-            sym = QualifiedSymbol(type_tokens=[link])
-            self.add_attrs(sym, owner_name=klass_name)
-            hierarchy.append (sym)
-
-            klass = parent_class
-
-        hierarchy.reverse()
-        return hierarchy
 
     # setup-time private methods
 
@@ -624,28 +542,14 @@ class GIExtension(Extension):
         return (parameters, retval)
 
     def __create_callback_symbol (self, node, parent_name):
-        parameters = []
-        parameters_nodes = node.find(core_ns('parameters'))
         name = node.attrib[c_ns('type')]
-        if parameters_nodes is None:
-            parameters_nodes = []
-        for child in parameters_nodes:
-            parameter = self.__create_parameter_symbol (child,
-                                                        name)
-            parameters.append (parameter[0])
-
-        return_type = get_return_type_from_callback(node)
-        if return_type:
-            tokens = type_tokens_from_cdecl(return_type)
-            return_value = [ReturnItemSymbol(type_tokens=tokens)]
-        else:
-            return_value = [ReturnItemSymbol(type_tokens=[])]
-        self.add_attrs(return_value[0], owner_name=name)
+        parameters, retval = self.__create_parameters_and_retval (node,
+                                                                  name)
 
         filename = self.__get_symbol_filename(name)
         sym = self.get_or_create_symbol(
             CallbackSymbol, node, parameters=parameters,
-            return_value=return_value, display_name=name,
+            return_value=retval, display_name=name,
             filename=filename, parent_name=parent_name)
 
         return sym
@@ -865,8 +769,8 @@ class GIExtension(Extension):
 
     def __create_class_symbol (self, node, gi_name, klass_name,
                                unique_name, filename):
-        hierarchy = self.__gir_hierarchies[gi_name]
-        children = self.__gir_children_map[gi_name]
+        hierarchy = get_parents_hierarchy(gi_name)
+        children = get_children(gi_name)
 
         members, raw_text = self.__get_structure_members(node, filename,
                                                          klass_name,

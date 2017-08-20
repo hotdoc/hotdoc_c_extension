@@ -191,6 +191,21 @@ def get_gir_type (cur_ns, name):
     return CLASS_NODES.get (name)
 
 
+def get_array_type(node):
+    array = node.find(core_ns('array'))
+    if array is None:
+        return None
+
+    return array.attrib[c_ns('type')]
+
+def get_return_type_from_callback(node):
+    return_node = node.find(core_ns('return-value'))
+    array_type = get_array_type(return_node)
+    if array_type:
+        return array_type
+
+    return return_node.find(core_ns('type')).attrib[c_ns('type')]
+
 def type_tokens_from_gitype (cur_ns, ptype_name):
     qs = None
 
@@ -591,6 +606,8 @@ class GIExtension(Extension):
         self.__class_gtype_structs = {}
         self.__default_page = DEFAULT_PAGE
 
+    # Static vmethod implementations
+
     @staticmethod
     def add_arguments (parser):
         group = parser.add_argument_group('GObject-introspection extension',
@@ -602,6 +619,12 @@ class GIExtension(Extension):
                 nargs='*',
                 help="Languages to translate documentation in %s"
                      ", default is to make all languages" % str (OUTPUT_LANGUAGES))
+
+    @staticmethod
+    def get_dependencies ():
+        return [ExtDependency('c-extension', is_upstream=True, optional=True)]
+
+    # Chained-up vmethod overrides
 
     def parse_config(self, config):
         super(GIExtension, self).parse_config(config)
@@ -620,15 +643,6 @@ class GIExtension(Extension):
             cache_nodes(gir_root)
         self.__create_hierarchies()
 
-    def _make_formatter(self):
-        return GIFormatter(self)
-
-    def _get_smart_index_title(self):
-        return 'GObject API Reference'
-
-    def _get_all_sources(self):
-        return [s for s in self.c_sources if s.endswith('.h')]
-
     def setup (self):
         commonprefix = os.path.commonprefix(list(self._get_all_sources()))
         self.__default_page = os.path.join(os.path.dirname(commonprefix),
@@ -643,15 +657,6 @@ class GIExtension(Extension):
         self.__scan_sources()
         self.app.link_resolver.resolving_link_signal.connect_after(self.__translate_link_ref, self.languages[0])
 
-    def __scan_comments(self):
-        comment_parser = GtkDocParser(self.project)
-        block = comment_parser.parse_comment(DEFAULT_PAGE_COMMENT,
-                                             DEFAULT_PAGE, 0, 0)
-        self.app.database.add_comment(block)
-
-        stale_c, unlisted = self.get_stale_files(self.c_sources)
-        CCommentExtractor(self, comment_parser).parse_comments(stale_c, SMART_FILTERS)
-
     def format_page(self, page, link_resolver, output):
         link_resolver.get_link_signal.connect(self.search_online_links)
 
@@ -660,12 +665,12 @@ class GIExtension(Extension):
         for l in self.languages:
             self.formatter.formatting_symbol_signal.connect(self.__formatting_symbol, l)
             page.meta['extra']['gi-language'] = l
-            self.setup_language (l, prev_l)
+            self.__setup_language (l, prev_l)
             Extension.format_page (self, page, link_resolver, output)
             prev_l = l
             self.formatter.formatting_symbol_signal.disconnect(self.__formatting_symbol, l)
 
-        self.setup_language(None, l)
+        self.__setup_language(None, l)
         page.meta['extra']['gi-language'] = self.languages[0]
 
         link_resolver.get_link_signal.disconnect(self.search_online_links)
@@ -674,10 +679,10 @@ class GIExtension(Extension):
         prev_l = None
         for l in self.languages:
             page.meta['extra']['gi-language'] = l
-            self.setup_language (l, prev_l)
+            self.__setup_language (l, prev_l)
             Extension.write_out_page (self, output, page)
             prev_l = l
-        self.setup_language(None, l)
+        self.__setup_language(None, l)
 
     def write_out_sitemap(self, opath):
         for l in self.languages:
@@ -686,91 +691,204 @@ class GIExtension(Extension):
             Extension.write_out_sitemap (self, lopath)
         GIFormatter.sitemap_language = None
 
-    @staticmethod
-    def get_dependencies ():
-        return [ExtDependency('c-extension', is_upstream=True, optional=True)]
+    # We implement filtering of some symbols
+    def get_or_create_symbol(self, *args, **kwargs):
+        args = list(args)
+        node = None
+        if len(args) > 1:
+            node = args.pop(1)
+        aliases = kwargs.get('aliases', [])
 
-    def __scan_sources(self):
-        for gir_file in self.sources:
-            root = etree.parse(gir_file).getroot()
-            self.__scan_node(root)
+        if self.smart_index:
+            name = kwargs['display_name']
+            if kwargs.get('filename', self.__default_page) == self.__default_page:
+                unique_name = kwargs.get('unique_name', kwargs.get('display_name'))
+                kwargs['filename'] = self.__get_symbol_filename(unique_name)
+                if kwargs.get('filename', self.__default_page) == self.__default_page:
+                    self.warn("no-location-indication",
+                              "No way to determine where %s should land"
+                              " putting it to %s."
+                              " Document the symbol for smart indexing to work" % (
+                              name, os.path.basename(self.__default_page)))
 
-    def __scan_node(self, node, parent_name=None):
-        gi_name = get_gi_name (node)
+        res = super(GIExtension, self).get_or_create_symbol(*args, **kwargs)
 
-        if 'moved-to' in node.attrib:
-            return False
-        if node.tag == core_ns('class'):
-            self.__create_structure(ClassSymbol, node, gi_name)
-        elif node.tag in (core_ns('function'), core_ns('method'), core_ns('constructor')):
-            self.__create_function_symbol(node, parent_name)
-        elif node.tag == core_ns('virtual-method'):
-            self.__create_vfunc_symbol(node, parent_name)
-        elif node.tag == core_ns('property'):
-            self.__create_property_symbol(node, parent_name)
-        elif node.tag == glib_ns('signal'):
-            self.__create_signal_symbol(node, parent_name)
-        elif node.tag == core_ns('alias'):
-            self.__create_alias_symbol(node, gi_name, parent_name)
-        elif node.tag == core_ns('record'):
-            self.__create_structure(StructSymbol, node, gi_name)
-        elif node.tag == core_ns('interface'):
-            self.__create_structure(InterfaceSymbol, node, gi_name)
-        elif node.tag == core_ns('enumeration'):
-            self.__create_enum_symbol(node)
-        elif node.tag == core_ns('bitfield'):
-            self.__create_enum_symbol(node)
-        elif node.tag == core_ns('callback'):
-            self.__create_callback_symbol(node, parent_name)
-        elif node.tag == core_ns('field'):
-            pass
+        if node is not None and res:
+            NODE_CACHE[res.unique_name] = node
+            for alias in aliases:
+                NODE_CACHE[alias] = node
+
+        return res
+
+    # VMethod implementations
+
+    def _make_formatter(self):
+        return GIFormatter(self)
+
+    def _get_smart_index_title(self):
+        return 'GObject API Reference'
+
+    def _get_smart_key(self, symbol):
+        if self.__class_gtype_structs.get(symbol.unique_name):
+            # Working with a Class Structure, not adding it anywhere
+            return None
+
+        return symbol.extra.get('implementation_filename',
+                                super()._get_smart_key(symbol))
+
+    def _get_all_sources(self):
+        return [s for s in self.c_sources if s.endswith('.h')]
+
+    # Exposed API for dependent extensions
+
+    @classmethod
+    def search_online_links(cls, resolver, name):
+        href = cls.__gtkdoc_hrefs.get(name)
+        if href:
+            return Link(href, name, name)
+        return None
+
+    # parse_config-time private methods
+
+    def __create_hierarchies(self):
+        for gi_name, klass in CLASS_NODES.items():
+            hierarchy = self.__create_hierarchy (klass)
+            self.__gir_hierarchies[gi_name] = hierarchy
+
+    def __create_hierarchy (self, klass):
+        klaass = klass
+        hierarchy = []
+        while (True):
+            parent_name = klass.attrib.get('parent')
+            if not parent_name:
+                break
+
+            if not '.' in parent_name:
+                namespace = klass.getparent().attrib['name']
+                parent_name = '%s.%s' % (namespace, parent_name)
+            parent_class = CLASS_NODES[parent_name]
+            children = self.__gir_children_map[parent_name]
+            klass_name = get_klass_name (klass)
+
+            if not klass_name in children:
+                link = Link(None, klass_name, klass_name)
+                sym = QualifiedSymbol(type_tokens=[link])
+                self.add_attrs(sym, owner_name=klass_name)
+                children[klass_name] = sym
+
+            klass_name = get_klass_name(parent_class)
+            link = Link(None, klass_name, klass_name)
+            sym = QualifiedSymbol(type_tokens=[link])
+            self.add_attrs(sym, owner_name=klass_name)
+            hierarchy.append (sym)
+
+            klass = parent_class
+
+        hierarchy.reverse()
+        return hierarchy
+
+    # setup-time private methods
+
+    def __get_symbol_filename(self, unique_name):
+        if self.__current_output_filename:
+            return self.__current_output_filename
+
+        comment = self.app.database.get_comment(unique_name)
+        if comment and comment.filename:
+            return '%s.h' % os.path.splitext(comment.filename)[0]
+
+        return self.__default_page
+
+    def __get_structure_members(self, node, filename, struct_name, parent_name,
+                                is_union=False, indent=4 * ' ',
+                                concatenated_name=None, in_union=False):
+        if is_union:
+            sname = ''
         else:
-            for cnode in node:
-                self.__scan_node(cnode)
+            sname = struct_name + ' ' if struct_name is not None else ''
 
-    def __create_callback_symbol (self, node, parent_name):
-        parameters = []
-        parameters_nodes = node.find(core_ns('parameters'))
-        name = node.attrib[c_ns('type')]
-        if parameters_nodes is None:
-            parameters_nodes = []
-        for child in parameters_nodes:
-            parameter = self.__create_parameter_symbol (child,
-                                                        name)
-            parameters.append (parameter[0])
-
-        return_type = self.__get_return_type_from_callback(node)
-        if return_type:
-            tokens = type_tokens_from_cdecl(return_type)
-            return_value = [ReturnItemSymbol(type_tokens=tokens)]
-        else:
-            return_value = [ReturnItemSymbol(type_tokens=[])]
-        self.add_attrs(return_value[0], owner_name=name)
-
-        filename = self.__get_symbol_filename(name)
-        sym = self.get_or_create_symbol(
-            CallbackSymbol, node, parameters=parameters,
-            return_value=return_value, display_name=name,
-            filename=filename, parent_name=parent_name)
-
-        return sym
-
-    def __create_enum_symbol (self, node, spelling=None):
-        name = node.attrib[c_ns('type')]
-
-        filename = self.__get_symbol_filename(name)
+        struct_str = "%s%s{" % ('union ' if is_union else 'struct ', sname)
         members = []
-        for field in node.findall(core_ns('member')):
+        for field in node.getchildren():
+            if field.tag in [core_ns('record'), core_ns('union')]:
+                if not concatenated_name:
+                    concatenated_name = parent_name
+
+                if struct_name and struct_name != parent_name:
+                    concatenated_name += '.' + struct_name
+
+                new_union = field.tag == core_ns('union')
+                union_members, union_str = self.__get_structure_members(
+                    field, filename, field.attrib.get('name', None),
+                    parent_name, indent=indent + 4 * ' ',
+                    is_union=new_union, concatenated_name=concatenated_name,
+                    in_union=in_union or new_union)
+                struct_str += "\n%s%s" % (indent, union_str)
+                members += union_members
+                continue
+            elif field.tag != core_ns('field'):
+                continue
+
+            children = field.getchildren()
+            if not children:
+                continue
+
+            if field.attrib.get('private', False):
+                continue
+
+            type_gi_name = None
+            if children[0].tag == core_ns('callback'):
+                field_name = field.attrib['name'] + '()'
+                type_ = get_return_type_from_callback(children[-1])
+
+                struct_str += "\n%s%s %s (" % (indent, type_, field_name[:-2])
+                parameters_nodes = children[0].find(core_ns('parameters'))
+                if parameters_nodes is not None:
+                    for j, gi_parameter in enumerate(parameters_nodes):
+                        param_name = gi_parameter.attrib['name']
+                        type_desc = type_description_from_node(gi_parameter)
+                        struct_str += "%s%s %s" % (', ' if j else '', type_desc.c_name,
+                                                   param_name)
+                struct_str += ");"
+
+                # Weed out vmethods, handled separately
+                continue
+            else:
+                field_name = field.attrib['name']
+                array_type = get_array_type(field)
+                if array_type:
+                    type_ = array_type
+                else:
+                    type_node = field.find(core_ns('type'))
+                    type_ = type_node.attrib[c_ns('type')]
+                    type_gi_name = type_node.attrib.get('name')
+                struct_str += "\n%s%s %s;" % (indent, type_, field_name)
+
+
+            name = "%s.%s" % (concatenated_name or struct_name, field_name)
+            aliases = ["%s::%s" % (struct_name, field_name)]
+
+            tokens = type_tokens_from_cdecl (type_)
+            qtype = QualifiedSymbol(type_tokens=tokens)
+
+            self.add_attrs(qtype, owner_name=struct_name)
             member = self.get_or_create_symbol(
-                Symbol, node, display_name=field.attrib[c_ns('identifier')],
-                filename=filename)
-            member.enum_value = field.attrib['value']
+                FieldSymbol, field,
+                member_name=field_name, qtype=qtype,
+                filename=filename, display_name=name,
+                unique_name=name, parent_name=parent_name,
+                aliases=aliases)
+            self.add_attrs(member, owner_name=struct_name,
+                                    gi_name=type_gi_name,
+                                    in_union=in_union)
             members.append(member)
 
-        return self.get_or_create_symbol(
-            EnumSymbol, node, members=members,
-            anonymous=False, display_name=name,
-            filename=filename, raw_text=None)
+        if is_union and struct_name:
+            struct_str += '\n%s} %s;' % (indent[3:], struct_name)
+        else:
+            struct_str += '\n%s};' % indent[3:]
+
+        return members, struct_str
 
     def __find_structure_pagename(self, node, unique_name, is_class):
         filename = self.__get_symbol_filename(unique_name)
@@ -827,168 +945,22 @@ class GIExtension(Extension):
 
         return filename
 
-    def __create_hierarchies(self):
-        for gi_name, klass in CLASS_NODES.items():
-            hierarchy = self.__create_hierarchy (klass)
-            self.__gir_hierarchies[gi_name] = hierarchy
+    def __sort_parameters (self, symbol, retval, parameters):
+        in_parameters = []
+        out_parameters = []
 
-    def __create_hierarchy (self, klass):
-        klaass = klass
-        hierarchy = []
-        while (True):
-            parent_name = klass.attrib.get('parent')
-            if not parent_name:
-                break
+        for i, param in enumerate (parameters):
+            if isinstance(symbol, MethodSymbol) and i == 0:
+                continue
 
-            if not '.' in parent_name:
-                namespace = klass.getparent().attrib['name']
-                parent_name = '%s.%s' % (namespace, parent_name)
-            parent_class = CLASS_NODES[parent_name]
-            children = self.__gir_children_map[parent_name]
-            klass_name = get_klass_name (klass)
+            direction = param.get_extension_attribute ('gi-extension', 'direction')
 
-            if not klass_name in children:
-                link = Link(None, klass_name, klass_name)
-                sym = QualifiedSymbol(type_tokens=[link])
-                self.add_attrs(sym, owner_name=klass_name)
-                children[klass_name] = sym
+            if direction == 'in' or direction == 'inout':
+                in_parameters.append (param)
+            if direction == 'out' or direction == 'inout':
+                out_parameters.append (param)
 
-            klass_name = get_klass_name(parent_class)
-            link = Link(None, klass_name, klass_name)
-            sym = QualifiedSymbol(type_tokens=[link])
-            self.add_attrs(sym, owner_name=klass_name)
-            hierarchy.append (sym)
-
-            klass = parent_class
-
-        hierarchy.reverse()
-        return hierarchy
-
-    def __add_annotations (self, formatter, symbol):
-        if symbol.get_extension_attribute(self.extension_name, 'language') == 'c':
-            annotations = self.__annotation_parser.make_annotations(symbol)
-
-            # FIXME: OK this is format time but still seems strange
-            if annotations:
-                extra_content = formatter.format_annotations (annotations)
-                symbol.extension_contents['Annotations'] = extra_content
-        else:
-            symbol.extension_contents.pop('Annotations', None)
-
-    def __formatting_symbol(self, formatter, symbol, language):
-        symbol.add_extension_attribute(self.extension_name, 'language', language)
-
-        if isinstance(symbol, (ReturnItemSymbol, ParameterSymbol)):
-            self.__add_annotations (formatter, symbol)
-
-        if isinstance (symbol, QualifiedSymbol):
-            return True
-
-        # We discard symbols at formatting time because they might be exposed
-        # in other languages
-        if language != 'c':
-            return is_introspectable(symbol.unique_name, language)
-
-        return True
-
-    def __translate_link_ref(self, link, language):
-        fund = FUNDAMENTALS[language].get(link.id_)
-        if fund:
-            return fund.ref
-
-        aliased_link = ALIASED_LINKS[language].get(link.id_)
-        if aliased_link:
-            return self.__translate_link_ref(aliased_link, language)
-
-        page = self.project.get_page_for_symbol(link.id_)
-        if page:
-            if page.extension_name != self.extension_name:
-                return None
-
-            project = self.project.get_project_for_page (page)
-            if link.ref and language != 'c' and not is_introspectable(link.id_, language):
-                return insert_language(link.ref, 'c', project)
-
-            res = insert_language(link.ref, language, project)
-            return res
-
-        if link.ref is None:
-            return GTKDOC_HREFS.get(link.id_)
-
-        return None
-
-    @classmethod
-    def search_online_links(cls, resolver, name):
-        href = cls.__gtkdoc_hrefs.get(name)
-        if href:
-            return Link(href, name, name)
-        return None
-
-    def __translate_link_title(self, link, language):
-        fund = FUNDAMENTALS[language].get(link.id_)
-        if fund:
-            return fund._title
-
-        if language != 'c' and not is_introspectable(link.id_, language):
-            return link._title + ' (not introspectable)'
-
-        aliased_link = ALIASED_LINKS[language].get(link.id_)
-        if aliased_link:
-            return self.__translate_link_title(aliased_link, language)
-
-        translated = TRANSLATED_NAMES[language].get(link.id_)
-        if translated:
-            return translated
-
-        if language == 'c' and link.id_ in GTKDOC_HREFS:
-            return link.id_
-
-        return None
-
-    def setup_language (self, language, prev_l):
-        if prev_l:
-            Link.resolving_title_signal.disconnect(self.__translate_link_title,
-                                                   prev_l)
-            self.app.link_resolver.resolving_link_signal.disconnect(self.__translate_link_ref, prev_l)
-        else:
-            self.app.link_resolver.resolving_link_signal.disconnect(self.__translate_link_ref, self.languages[0])
-
-
-        if language is not None:
-            Link.resolving_title_signal.connect(self.__translate_link_title,
-                                                language)
-            self.app.link_resolver.resolving_link_signal.connect(self.__translate_link_ref, language)
-        else:
-            self.app.link_resolver.resolving_link_signal.connect_after(self.__translate_link_ref, self.languages[0])
-
-    # We implement filtering of some symbols
-    def get_or_create_symbol(self, *args, **kwargs):
-        args = list(args)
-        node = None
-        if len(args) > 1:
-            node = args.pop(1)
-        aliases = kwargs.get('aliases', [])
-
-        if self.smart_index:
-            name = kwargs['display_name']
-            if kwargs.get('filename', self.__default_page) == self.__default_page:
-                unique_name = kwargs.get('unique_name', kwargs.get('display_name'))
-                kwargs['filename'] = self.__get_symbol_filename(unique_name)
-                if kwargs.get('filename', self.__default_page) == self.__default_page:
-                    self.warn("no-location-indication",
-                              "No way to determine where %s should land"
-                              " putting it to %s."
-                              " Document the symbol for smart indexing to work" % (
-                              name, os.path.basename(self.__default_page)))
-
-        res = super(GIExtension, self).get_or_create_symbol(*args, **kwargs)
-
-        if node is not None and res:
-            NODE_CACHE[res.unique_name] = node
-            for alias in aliases:
-                NODE_CACHE[alias] = node
-
-        return res
+        self.add_attrs(symbol, parameters=in_parameters)
 
     def __create_parameter_symbol (self, gi_parameter, owner_name):
         param_name = gi_parameter.attrib['name']
@@ -1058,22 +1030,49 @@ class GIExtension(Extension):
 
         return (parameters, retval)
 
-    def __sort_parameters (self, symbol, retval, parameters):
-        in_parameters = []
-        out_parameters = []
+    def __create_callback_symbol (self, node, parent_name):
+        parameters = []
+        parameters_nodes = node.find(core_ns('parameters'))
+        name = node.attrib[c_ns('type')]
+        if parameters_nodes is None:
+            parameters_nodes = []
+        for child in parameters_nodes:
+            parameter = self.__create_parameter_symbol (child,
+                                                        name)
+            parameters.append (parameter[0])
 
-        for i, param in enumerate (parameters):
-            if isinstance(symbol, MethodSymbol) and i == 0:
-                continue
+        return_type = get_return_type_from_callback(node)
+        if return_type:
+            tokens = type_tokens_from_cdecl(return_type)
+            return_value = [ReturnItemSymbol(type_tokens=tokens)]
+        else:
+            return_value = [ReturnItemSymbol(type_tokens=[])]
+        self.add_attrs(return_value[0], owner_name=name)
 
-            direction = param.get_extension_attribute ('gi-extension', 'direction')
+        filename = self.__get_symbol_filename(name)
+        sym = self.get_or_create_symbol(
+            CallbackSymbol, node, parameters=parameters,
+            return_value=return_value, display_name=name,
+            filename=filename, parent_name=parent_name)
 
-            if direction == 'in' or direction == 'inout':
-                in_parameters.append (param)
-            if direction == 'out' or direction == 'inout':
-                out_parameters.append (param)
+        return sym
 
-        self.add_attrs(symbol, parameters=in_parameters)
+    def __create_enum_symbol (self, node, spelling=None):
+        name = node.attrib[c_ns('type')]
+
+        filename = self.__get_symbol_filename(name)
+        members = []
+        for field in node.findall(core_ns('member')):
+            member = self.get_or_create_symbol(
+                Symbol, node, display_name=field.attrib[c_ns('identifier')],
+                filename=filename)
+            member.enum_value = field.attrib['value']
+            members.append(member)
+
+        return self.get_or_create_symbol(
+            EnumSymbol, node, members=members,
+            anonymous=False, display_name=name,
+            filename=filename, raw_text=None)
 
     def __create_signal_symbol (self, node, parent_name):
         unique_name, name, klass_name = get_symbol_names(node)
@@ -1190,16 +1189,6 @@ class GIExtension(Extension):
 
         return symbol
 
-    def __get_symbol_filename(self, unique_name):
-        if self.__current_output_filename:
-            return self.__current_output_filename
-
-        comment = self.app.database.get_comment(unique_name)
-        if comment and comment.filename:
-            return '%s.h' % os.path.splitext(comment.filename)[0]
-
-        return self.__default_page
-
     def __create_alias_symbol (self, node, gi_name, parent_name):
         name = get_symbol_names(node)[0]
 
@@ -1302,112 +1291,6 @@ class GIExtension(Extension):
 
         return res
 
-    def __get_array_type(self, node):
-        array = node.find(core_ns('array'))
-        if array is None:
-            return None
-
-        return array.attrib[c_ns('type')]
-
-    def __get_return_type_from_callback(self, node):
-        return_node = node.find(core_ns('return-value'))
-        array_type = self.__get_array_type(return_node)
-        if array_type:
-            return array_type
-
-        return return_node.find(core_ns('type')).attrib[c_ns('type')]
-
-    def __get_structure_members(self, node, filename, struct_name, parent_name,
-                                is_union=False, indent=4 * ' ',
-                                concatenated_name=None, in_union=False):
-        if is_union:
-            sname = ''
-        else:
-            sname = struct_name + ' ' if struct_name is not None else ''
-
-        struct_str = "%s%s{" % ('union ' if is_union else 'struct ', sname)
-        members = []
-        for field in node.getchildren():
-            if field.tag in [core_ns('record'), core_ns('union')]:
-                if not concatenated_name:
-                    concatenated_name = parent_name
-
-                if struct_name and struct_name != parent_name:
-                    concatenated_name += '.' + struct_name
-
-                new_union = field.tag == core_ns('union')
-                union_members, union_str = self.__get_structure_members(
-                    field, filename, field.attrib.get('name', None),
-                    parent_name, indent=indent + 4 * ' ',
-                    is_union=new_union, concatenated_name=concatenated_name,
-                    in_union=in_union or new_union)
-                struct_str += "\n%s%s" % (indent, union_str)
-                members += union_members
-                continue
-            elif field.tag != core_ns('field'):
-                continue
-
-            children = field.getchildren()
-            if not children:
-                continue
-
-            if field.attrib.get('private', False):
-                continue
-
-            type_gi_name = None
-            if children[0].tag == core_ns('callback'):
-                field_name = field.attrib['name'] + '()'
-                type_ = self.__get_return_type_from_callback(children[0])
-
-                struct_str += "\n%s%s %s (" % (indent, type_, field_name[:-2])
-                parameters_nodes = children[0].find(core_ns('parameters'))
-                if parameters_nodes is not None:
-                    for j, gi_parameter in enumerate(parameters_nodes):
-                        param_name = gi_parameter.attrib['name']
-                        type_desc = type_description_from_node(gi_parameter)
-                        struct_str += "%s%s %s" % (', ' if j else '', type_desc.c_name,
-                                                   param_name)
-                struct_str += ");"
-
-                # Weed out vmethods, handled separately
-                continue
-            else:
-                field_name = field.attrib['name']
-                array_type = self.__get_array_type(field)
-                if array_type:
-                    type_ = array_type
-                else:
-                    type_node = field.find(core_ns('type'))
-                    type_ = type_node.attrib[c_ns('type')]
-                    type_gi_name = type_node.attrib.get('name')
-                struct_str += "\n%s%s %s;" % (indent, type_, field_name)
-
-
-            name = "%s.%s" % (concatenated_name or struct_name, field_name)
-            aliases = ["%s::%s" % (struct_name, field_name)]
-
-            tokens = type_tokens_from_cdecl (type_)
-            qtype = QualifiedSymbol(type_tokens=tokens)
-
-            self.add_attrs(qtype, owner_name=struct_name)
-            member = self.get_or_create_symbol(
-                FieldSymbol, field,
-                member_name=field_name, qtype=qtype,
-                filename=filename, display_name=name,
-                unique_name=name, parent_name=parent_name,
-                aliases=aliases)
-            self.add_attrs(member, owner_name=struct_name,
-                                    gi_name=type_gi_name,
-                                    in_union=in_union)
-            members.append(member)
-
-        if is_union and struct_name:
-            struct_str += '\n%s} %s;' % (indent[3:], struct_name)
-        else:
-            struct_str += '\n%s};' % indent[3:]
-
-        return members, struct_str
-
     def __create_struct_symbol(self, node, struct_name, filename,
                                parent_name):
 
@@ -1458,10 +1341,142 @@ class GIExtension(Extension):
         self.__sort_parameters (func, func.return_value, func.parameters)
         return func
 
-    def _get_smart_key(self, symbol):
-        if self.__class_gtype_structs.get(symbol.unique_name):
-            # Working with a Class Structure, not adding it anywhere
-            return None
+    def __scan_comments(self):
+        comment_parser = GtkDocParser(self.project)
+        block = comment_parser.parse_comment(DEFAULT_PAGE_COMMENT,
+                                             DEFAULT_PAGE, 0, 0)
+        self.app.database.add_comment(block)
 
-        return symbol.extra.get('implementation_filename',
-                                super()._get_smart_key(symbol))
+        stale_c, unlisted = self.get_stale_files(self.c_sources)
+        CCommentExtractor(self, comment_parser).parse_comments(stale_c, SMART_FILTERS)
+
+    def __scan_node(self, node, parent_name=None):
+        gi_name = get_gi_name (node)
+
+        if 'moved-to' in node.attrib:
+            return False
+        if node.tag == core_ns('class'):
+            self.__create_structure(ClassSymbol, node, gi_name)
+        elif node.tag in (core_ns('function'), core_ns('method'), core_ns('constructor')):
+            self.__create_function_symbol(node, parent_name)
+        elif node.tag == core_ns('virtual-method'):
+            self.__create_vfunc_symbol(node, parent_name)
+        elif node.tag == core_ns('property'):
+            self.__create_property_symbol(node, parent_name)
+        elif node.tag == glib_ns('signal'):
+            self.__create_signal_symbol(node, parent_name)
+        elif node.tag == core_ns('alias'):
+            self.__create_alias_symbol(node, gi_name, parent_name)
+        elif node.tag == core_ns('record'):
+            self.__create_structure(StructSymbol, node, gi_name)
+        elif node.tag == core_ns('interface'):
+            self.__create_structure(InterfaceSymbol, node, gi_name)
+        elif node.tag == core_ns('enumeration'):
+            self.__create_enum_symbol(node)
+        elif node.tag == core_ns('bitfield'):
+            self.__create_enum_symbol(node)
+        elif node.tag == core_ns('callback'):
+            self.__create_callback_symbol(node, parent_name)
+        elif node.tag == core_ns('field'):
+            pass
+        else:
+            for cnode in node:
+                self.__scan_node(cnode)
+
+    def __scan_sources(self):
+        for gir_file in self.sources:
+            root = etree.parse(gir_file).getroot()
+            self.__scan_node(root)
+
+    # Format-time private methods
+
+    def __add_annotations (self, formatter, symbol):
+        if symbol.get_extension_attribute(self.extension_name, 'language') == 'c':
+            annotations = self.__annotation_parser.make_annotations(symbol)
+
+            # FIXME: OK this is format time but still seems strange
+            if annotations:
+                extra_content = formatter.format_annotations (annotations)
+                symbol.extension_contents['Annotations'] = extra_content
+        else:
+            symbol.extension_contents.pop('Annotations', None)
+
+    def __formatting_symbol(self, formatter, symbol, language):
+        symbol.add_extension_attribute(self.extension_name, 'language', language)
+
+        if isinstance(symbol, (ReturnItemSymbol, ParameterSymbol)):
+            self.__add_annotations (formatter, symbol)
+
+        if isinstance (symbol, QualifiedSymbol):
+            return True
+
+        # We discard symbols at formatting time because they might be exposed
+        # in other languages
+        if language != 'c':
+            return is_introspectable(symbol.unique_name, language)
+
+        return True
+
+    def __translate_link_ref(self, link, language):
+        fund = FUNDAMENTALS[language].get(link.id_)
+        if fund:
+            return fund.ref
+
+        aliased_link = ALIASED_LINKS[language].get(link.id_)
+        if aliased_link:
+            return self.__translate_link_ref(aliased_link, language)
+
+        page = self.project.get_page_for_symbol(link.id_)
+        if page:
+            if page.extension_name != self.extension_name:
+                return None
+
+            project = self.project.get_project_for_page (page)
+            if link.ref and language != 'c' and not is_introspectable(link.id_, language):
+                return insert_language(link.ref, 'c', project)
+
+            res = insert_language(link.ref, language, project)
+            return res
+
+        if link.ref is None:
+            return GTKDOC_HREFS.get(link.id_)
+
+        return None
+
+    def __translate_link_title(self, link, language):
+        fund = FUNDAMENTALS[language].get(link.id_)
+        if fund:
+            return fund._title
+
+        if language != 'c' and not is_introspectable(link.id_, language):
+            return link._title + ' (not introspectable)'
+
+        aliased_link = ALIASED_LINKS[language].get(link.id_)
+        if aliased_link:
+            return self.__translate_link_title(aliased_link, language)
+
+        translated = TRANSLATED_NAMES[language].get(link.id_)
+        if translated:
+            return translated
+
+        if language == 'c' and link.id_ in GTKDOC_HREFS:
+            return link.id_
+
+        return None
+
+    def __setup_language (self, language, prev_l):
+        if prev_l:
+            Link.resolving_title_signal.disconnect(self.__translate_link_title,
+                                                   prev_l)
+            self.app.link_resolver.resolving_link_signal.disconnect(self.__translate_link_ref, prev_l)
+        else:
+            self.app.link_resolver.resolving_link_signal.disconnect(self.__translate_link_ref, self.languages[0])
+
+
+        if language is not None:
+            Link.resolving_title_signal.connect(self.__translate_link_title,
+                                                language)
+            self.app.link_resolver.resolving_link_signal.connect(self.__translate_link_ref, language)
+        else:
+            self.app.link_resolver.resolving_link_signal.connect_after(self.__translate_link_ref, self.languages[0])
+

@@ -270,24 +270,3 @@ class GIFormatter(Formatter):
     def get_output_folder(self, page):
         lang_path = GIFormatter.sitemap_language or page.meta['extra']['gi-language']
         return os.path.join(super().get_output_folder(page), lang_path)
-
-    def patch_page(self, page, symbol, output):
-        symbol.update_children_comments()
-        for l in self.extension.languages:
-            self.extension.setup_language (l)
-            self.format_symbol(symbol, self.extension.app.resolver)
-
-            parser = lxml.etree.XMLParser(encoding='utf-8', recover=True)
-            page_path = os.path.join(output, l, page.link.ref)
-            tree = lxml.etree.parse(page_path, parser)
-            root = tree.getroot()
-            elems = root.findall('.//div[@id="%s"]' % symbol.unique_name)
-            for elem in elems:
-                parent = elem.getparent()
-                new_elem = lxml.etree.fromstring(symbol.detailed_description)
-                parent.replace (elem, new_elem)
-
-            with open(page_path, 'w') as f:
-                tree.write_c14n(f)
-
-        self.extension.setup_language(None)

@@ -24,7 +24,6 @@ the index based on the comments location.
 """
 
 import os
-import pathlib
 
 from lxml import etree
 from collections import defaultdict
@@ -32,7 +31,6 @@ from collections import namedtuple
 
 from hotdoc.core.symbols import *
 from hotdoc.core.extension import Extension, ExtDependency
-from hotdoc.core.formatter import Formatter
 from hotdoc.core.links import Link, LinkResolver
 from hotdoc.core.tree import Page
 from hotdoc.core.comment import Comment
@@ -48,15 +46,9 @@ from hotdoc.parsers.gtk_doc import GtkDocParser
 from .utils.utils import CCommentExtractor
 
 from hotdoc_c_extension.gi_flags import *
-
-Logger.register_warning_code('missing-gir-include', BadInclusionException,
-                             'gi-extension')
-Logger.register_warning_code('no-location-indication', InvalidOutputException,
-                             'gi-extension')
-
-# Describes the type of Return or Parameter symbols
-SymbolTypeDesc = namedtuple('SymbolTypeDesc', [
-    'type_tokens', 'gi_name', 'c_name', 'nesting_depth'])
+from hotdoc_c_extension.gi_utils import *
+from hotdoc_c_extension.gi_node_cache import *
+from hotdoc_c_extension.gi_gtkdoc_links import GTKDOC_HREFS
 
 
 DESCRIPTION=\
@@ -71,68 +63,42 @@ Must be used in combination with the C extension.
 """
 
 
-def pprint_xml(node):
-    print (etree.tostring(node, pretty_print=True).decode())
+# This in order to prioritize gir sources from all subprojects
+ALL_GIRS = {}
 
 
-def core_ns(tag):
-    return '{http://www.gtk.org/introspection/core/1.0}%s' % tag
+OUTPUT_LANGUAGES = ['c', 'python', 'javascript']
 
 
-def glib_ns(tag):
-    return '{http://www.gtk.org/introspection/glib/1.0}%s' % tag
+TRANSLATED_NAMES = {l: {} for l in OUTPUT_LANGUAGES}
 
 
-def c_ns(tag):
-    return '{http://www.gtk.org/introspection/c/1.0}%s' % tag
+ALIASED_LINKS = {l: {} for l in OUTPUT_LANGUAGES}
 
 
-def unnest_type (node):
-    array_nesting = 0
-
-    varargs = node.find(core_ns ('varargs'))
-    if varargs is not None:
-        return '...', 'valist', 0
-
-    type_ = node.find(core_ns('array'))
-    if type_ is None:
-        type_ = node.find(core_ns('type'))
-    ctype_name = type_.attrib.get(c_ns('type'), 'void*')
-
-    while type_.tag == core_ns('array') or type_.attrib.get('name') == 'GLib.List':
-        subtype_ = type_.find(core_ns('array'))
-        if subtype_ is None:
-            subtype_ = type_.find(core_ns('type'))
-        type_ = subtype_
-        array_nesting += 1
-
-    return ctype_name, type_.attrib.get('name', 'object'), array_nesting
+DEFAULT_PAGE = "Miscellaneous.default_page"
 
 
-def get_namespace(node):
-    parent = node.getparent()
-    nstag = '{%s}namespace' % NS_MAP['core']
-    while parent is not None and parent.tag != nstag:
-        parent = parent.getparent()
+DEFAULT_PAGE_COMMENT = """/**
+* Miscellaneous.default_page:
+* @title: Miscellaneous
+* @short-description: Miscellaneous unordered symbols
+*
+* Unordered miscellaneous symbols that were not properly documented
+*/
+"""
 
-    return parent.attrib['name']
+
+Logger.register_warning_code('missing-gir-include', BadInclusionException,
+                             'gi-extension')
+
+Logger.register_warning_code('no-location-indication', InvalidOutputException,
+                             'gi-extension')
 
 
-def type_tokens_from_cdecl(cdecl):
-    indirection = cdecl.count ('*')
-    qualified_type = cdecl.strip ('*')
-    tokens = []
-    for token in qualified_type.split ():
-        if token in ["const", "restrict", "volatile"]:
-            tokens.append(token + ' ')
-        else:
-            link = Link(None, token, token)
-            tokens.append (link)
-
-    for i in range(indirection):
-        tokens.append ('*')
-
-    return tokens
+# Describes the type of Return or Parameter symbols
+SymbolTypeDesc = namedtuple('SymbolTypeDesc', [
+    'type_tokens', 'gi_name', 'c_name', 'nesting_depth'])
 
 
 def get_gir_type (cur_ns, name):
@@ -142,21 +108,6 @@ def get_gir_type (cur_ns, name):
         return klass
     return CLASS_NODES.get (name)
 
-
-def get_array_type(node):
-    array = node.find(core_ns('array'))
-    if array is None:
-        return None
-
-    return array.attrib[c_ns('type')]
-
-def get_return_type_from_callback(node):
-    return_node = node.find(core_ns('return-value'))
-    array_type = get_array_type(return_node)
-    if array_type:
-        return array_type
-
-    return return_node.find(core_ns('type')).attrib[c_ns('type')]
 
 def type_tokens_from_gitype (cur_ns, ptype_name):
     qs = None
@@ -176,6 +127,7 @@ def type_tokens_from_gitype (cur_ns, ptype_name):
 
     return tokens
 
+
 def type_description_from_node(gi_node):
     ctype_name, gi_name, array_nesting = unnest_type (gi_node)
 
@@ -191,293 +143,6 @@ def type_description_from_node(gi_node):
         gi_name = namespaced
 
     return SymbolTypeDesc(type_tokens, gi_name, ctype_name, array_nesting)
-
-
-def get_gi_name_components(node):
-    parent = node.getparent()
-    if 'name' in node.attrib:
-        components = [node.attrib.get('name')]
-    else:
-        components = []
-
-    while parent is not None:
-        try:
-            components.insert(0, parent.attrib['name'])
-        except KeyError:
-            break
-        parent = parent.getparent()
-    return components
-
-
-def get_gi_name (node):
-    components = get_gi_name_components(node)
-    return '.'.join(components)
-
-
-def get_klass_name(klass):
-    klass_name = klass.attrib.get('{%s}type' % NS_MAP['c'])
-    if not klass_name:
-        klass_name = klass.attrib.get('{%s}type-name' % NS_MAP['glib'])
-    return klass_name
-
-
-def get_function_name(func):
-    return func.attrib.get('{%s}identifier' % NS_MAP['c'])
-
-
-def get_structure_name(node):
-    return node.attrib[c_ns('type')]
-
-
-def get_symbol_names(node):
-    if node.tag in (core_ns('class')):
-        _ = get_klass_name (node)
-        return _, _, _
-    elif node.tag in (core_ns('interface')):
-        _ = get_klass_name (node)
-        return _, _, _
-    elif node.tag in (core_ns('function'), core_ns('method'), core_ns('constructor')):
-        _ = get_function_name(node)
-        return _, _, _
-    elif node.tag == core_ns('virtual-method'):
-        klass_node = node.getparent()
-        ns = klass_node.getparent()
-        klass_structure_node = ns.xpath(
-            './*[@glib:is-gtype-struct-for="%s"]' % klass_node.attrib['name'],
-            namespaces=NS_MAP)[0]
-        parent_name = get_structure_name(klass_structure_node)
-        name = node.attrib['name']
-        unique_name = '%s::%s' % (parent_name, name)
-        return unique_name, name, unique_name
-    elif node.tag == core_ns('field'):
-        structure_node = node.getparent()
-        parent_name = get_structure_name(structure_node)
-        name = node.attrib['name']
-        unique_name = '%s::%s' % (parent_name, name)
-        return unique_name, name, unique_name
-    elif node.tag == core_ns('property'):
-        parent_name = get_klass_name(node.getparent())
-        klass_name = '%s::%s' % (parent_name, parent_name)
-        name = node.attrib['name']
-        unique_name = '%s:%s' % (parent_name, name)
-        return unique_name, name, klass_name
-    elif node.tag == glib_ns('signal'):
-        parent_name = get_klass_name(node.getparent())
-        klass_name = '%s::%s' % (parent_name, parent_name)
-        name = node.attrib['name']
-        unique_name = '%s::%s' % (parent_name, name)
-        return unique_name, name, klass_name
-    elif node.tag == core_ns('alias'):
-        _ = node.attrib.get(c_ns('type'))
-        return _, _, _
-    elif node.tag == core_ns('record'):
-        _ = get_structure_name(node)
-        return _, _, _
-    elif node.tag in (core_ns('enumeration'), core_ns('bitfield')):
-        _ = node.attrib[c_ns('type')]
-        return _, _, _
-
-    return None, None, None
-
-
-# This in order to prioritize gir sources from all subprojects
-ALL_GIRS = {}
-
-# Avoid parsing gir files multiple times
-PARSED_GIRS = set()
-
-if os.name == 'nt':
-    DATADIR = os.path.join(os.path.dirname(__file__), '..', 'share')
-else:
-    DATADIR = "/usr/share"
-
-def find_gir_file(gir_name):
-    if gir_name in ALL_GIRS:
-        return ALL_GIRS[gir_name]
-
-    xdg_dirs = os.getenv('XDG_DATA_DIRS') or ''
-    xdg_dirs = [p for p in xdg_dirs.split(':') if p]
-    xdg_dirs.append(DATADIR)
-    for dir_ in xdg_dirs:
-        gir_file = os.path.join(dir_, 'gir-1.0', gir_name)
-        if os.path.exists(gir_file):
-            return gir_file
-    return None
-
-# Boilerplate GObject macros we don't want to expose
-SMART_FILTERS = set()
-
-def generate_smart_filters(id_prefixes, sym_prefixes, node):
-    sym_prefix = node.attrib['{%s}symbol-prefix' % NS_MAP['c']]
-    SMART_FILTERS.add(('%s_IS_%s' % (sym_prefixes, sym_prefix)).upper())
-    SMART_FILTERS.add(('%s_TYPE_%s' % (sym_prefixes, sym_prefix)).upper())
-    SMART_FILTERS.add(('%s_%s' % (sym_prefixes, sym_prefix)).upper())
-    SMART_FILTERS.add(('%s_%s_CLASS' % (sym_prefixes, sym_prefix)).upper())
-    SMART_FILTERS.add(('%s_IS_%s_CLASS' % (sym_prefixes, sym_prefix)).upper())
-    SMART_FILTERS.add(('%s_%s_GET_CLASS' % (sym_prefixes, sym_prefix)).upper())
-    SMART_FILTERS.add(('%s_%s_GET_IFACE' % (sym_prefixes, sym_prefix)).upper())
-
-
-NODE_CACHE = {}
-# We need to collect all class nodes and build the
-# hierarchy beforehand, because git class nodes do not
-# know about their children
-CLASS_NODES = {}
-
-
-def cache_nodes(gir_root):
-    ns_node = gir_root.find('./{%s}namespace' % NS_MAP['core'])
-    id_prefixes = ns_node.attrib['{%s}identifier-prefixes' % NS_MAP['c']]
-    sym_prefixes = ns_node.attrib['{%s}symbol-prefixes' % NS_MAP['c']]
-
-    id_key = '{%s}identifier' % NS_MAP['c']
-    for node in gir_root.xpath(
-            './/*[@c:identifier]',
-            namespaces=NS_MAP):
-        NODE_CACHE[node.attrib[id_key]] = node
-
-    id_type = '{%s}type' % NS_MAP['c']
-    class_tag = '{%s}class' % NS_MAP['core']
-    interface_tag = '{%s}interface' % NS_MAP['core']
-    for node in gir_root.xpath(
-            './/*[not(self::core:type) and not (self::core:array)][@c:type]',
-            namespaces=NS_MAP):
-        name = node.attrib[id_type]
-        NODE_CACHE[name] = node
-        if node.tag in [class_tag, interface_tag]:
-            gi_name = '.'.join(get_gi_name_components(node))
-            CLASS_NODES[gi_name] = node
-            NODE_CACHE['%s::%s' % (name, name)] = node
-            generate_smart_filters(id_prefixes, sym_prefixes, node)
-
-    for node in gir_root.xpath(
-            './/core:property',
-            namespaces=NS_MAP):
-        name = '%s:%s' % (get_klass_name(node.getparent()),
-                          node.attrib['name'])
-        NODE_CACHE[name] = node
-
-    for node in gir_root.xpath(
-            './/glib:signal',
-            namespaces=NS_MAP):
-        name = '%s::%s' % (get_klass_name(node.getparent()),
-                           node.attrib['name'])
-        NODE_CACHE[name] = node
-
-    for node in gir_root.xpath(
-            './/core:virtual-method',
-            namespaces=NS_MAP):
-        name = get_symbol_names(node)[0]
-        NODE_CACHE[name] = node
-
-    for inc in gir_root.findall('./core:include',
-            namespaces = NS_MAP):
-        inc_name = inc.attrib["name"]
-        inc_version = inc.attrib["version"]
-        gir_file = find_gir_file('%s-%s.gir' % (inc_name, inc_version))
-        if not gir_file:
-            warn('missing-gir-include', "Couldn't find a gir for %s-%s.gir" %
-                    (inc_name, inc_version))
-            continue
-
-        if gir_file in PARSED_GIRS:
-            continue
-
-        PARSED_GIRS.add(gir_file)
-        inc_gir_root = etree.parse(gir_file).getroot()
-        cache_nodes(inc_gir_root)
-
-
-GTKDOC_HREFS = {}
-
-
-def parse_devhelp_index(dir_):
-    path = os.path.join(dir_, os.path.basename(dir_) + '.devhelp2')
-    if not os.path.exists(path):
-        return False
-
-    dh_root = etree.parse(path).getroot()
-    online = dh_root.attrib.get('online')
-    name = dh_root.attrib.get('name')
-    if not online:
-        if not name:
-            return False
-        online = 'https://developer.gnome.org/%s/unstable/' % name
-
-    keywords = dh_root.findall('.//{http://www.devhelp.net/book}keyword')
-    for kw in keywords:
-        name = kw.attrib["name"]
-        type_ = kw.attrib['type']
-        link = kw.attrib['link']
-
-        if type_ in ['macro', 'function']:
-            name = name.rstrip(u' ()')
-        elif type_ in ['struct', 'enum']:
-            split = name.split(' ', 1)
-            if len(split) == 2:
-                name = split[1]
-            else:
-                name = split[0]
-        elif type_ in ['signal', 'property']:
-            anchor = link.split('#', 1)[1]
-            split = anchor.split('-', 1)
-            if type_ == 'signal':
-                name = '%s::%s' % (split[0], split[1].lstrip('-'))
-            else:
-                name = '%s:%s' % (split[0], split[1].lstrip('-'))
-
-        GTKDOC_HREFS[name] = online + link
-
-    return True
-
-
-def parse_sgml_index(dir_):
-    remote_prefix = ""
-    n_links = 0
-    path = os.path.join(dir_, "index.sgml")
-    with open(path, 'r') as f:
-        for l in f:
-            if l.startswith("<ONLINE"):
-                remote_prefix = l.split('"')[1]
-            elif not remote_prefix:
-                break
-            elif l.startswith("<ANCHOR"):
-                split_line = l.split('"')
-                filename = split_line[3].split('/', 1)[-1]
-                title = split_line[1].replace('-', '_')
-
-                if title.endswith (":CAPS"):
-                    title = title [:-5]
-                if remote_prefix:
-                    href = '%s/%s' % (remote_prefix, filename)
-                else:
-                    href = filename
-
-                GTKDOC_HREFS[title] = href
-                n_links += 1
-
-def gather_gtk_doc_links ():
-    gtkdoc_dir = os.path.join(DATADIR, "gtk-doc", "html")
-    if not os.path.exists(gtkdoc_dir):
-        print("no gtk doc to gather links from in %s" % gtkdoc_dir)
-        return
-
-    for node in os.listdir(gtkdoc_dir):
-        dir_ = os.path.join(gtkdoc_dir, node)
-        if os.path.isdir(dir_):
-            if not parse_devhelp_index(dir_):
-                try:
-                    parse_sgml_index(dir_)
-                except IOError:
-                    pass
-
-
-gather_gtk_doc_links()
-
-
-OUTPUT_LANGUAGES = ['c', 'python', 'javascript']
-
-TRANSLATED_NAMES = {l: {} for l in OUTPUT_LANGUAGES}
 
 
 def add_translations(unique_name, node):
@@ -517,30 +182,6 @@ def is_introspectable(name, language):
 
     return True
 
-
-def insert_language(ref, language, project):
-    if not ref.startswith(project.sanitized_name + '/'):
-        return language + '/' + ref
-
-    p = pathlib.Path(ref)
-    return str(pathlib.Path(p.parts[0], language, *p.parts[1:]))
-
-
-ALIASED_LINKS = {l: {} for l in OUTPUT_LANGUAGES}
-
-DEFAULT_PAGE = "Miscellaneous.default_page"
-DEFAULT_PAGE_COMMENT = """/**
-* Miscellaneous.default_page:
-* @title: Miscellaneous
-* @short-description: Miscellaneous unordered symbols
-*
-* Unordered miscellaneous symbols that were not properly documented
-*/
-"""
-
-NS_MAP = {'core': 'http://www.gtk.org/introspection/core/1.0',
-          'c': 'http://www.gtk.org/introspection/c/1.0',
-          'glib': 'http://www.gtk.org/introspection/glib/1.0'}
 
 class GIExtension(Extension):
     extension_name = "gi-extension"
@@ -592,7 +233,7 @@ class GIExtension(Extension):
             self.languages = OUTPUT_LANGUAGES
         for gir_file in self.sources:
             gir_root = etree.parse(gir_file).getroot()
-            cache_nodes(gir_root)
+            cache_nodes(gir_root, ALL_GIRS)
         self.__create_hierarchies()
 
     def setup (self):

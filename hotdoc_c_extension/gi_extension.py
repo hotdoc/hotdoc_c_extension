@@ -511,6 +511,29 @@ gather_gtk_doc_links()
 OUTPUT_LANGUAGES = ['c', 'python', 'javascript']
 
 TRANSLATED_NAMES = {l: {} for l in OUTPUT_LANGUAGES}
+
+
+def add_translations(unique_name, node):
+    id_key = '{%s}identifier' % NS_MAP['c']
+    id_type = '{%s}type' % NS_MAP['c']
+
+    components = get_gi_name_components(node)
+    gi_name = '.'.join(components)
+
+    if id_key in node.attrib:
+        TRANSLATED_NAMES['python'][unique_name] = gi_name
+        components[-1] = 'prototype.%s' % components[-1]
+        TRANSLATED_NAMES['javascript'][unique_name] = '.'.join(components)
+        TRANSLATED_NAMES['c'][unique_name] = unique_name
+    elif id_type in node.attrib:
+        TRANSLATED_NAMES['python'][unique_name] = gi_name
+        TRANSLATED_NAMES['javascript'][unique_name] = gi_name
+        TRANSLATED_NAMES['c'][unique_name] = unique_name
+
+    return components, gi_name
+
+
+
 ALIASED_LINKS = {l: {} for l in OUTPUT_LANGUAGES}
 
 DEFAULT_PAGE = "Miscellaneous.default_page"
@@ -837,7 +860,7 @@ class GIExtension(Extension):
             return False
 
         if not name in TRANSLATED_NAMES['c']:
-            self.__add_translations(name, node)
+            add_translations(name, node)
 
         if node.attrib.get('introspectable') == '0':
             return False
@@ -1406,29 +1429,8 @@ class GIExtension(Extension):
                 unique_name=unique_name,
                 filename=filename)
 
-    def __add_translations(self, unique_name, node):
-        id_key = '{%s}identifier' % NS_MAP['c']
-        id_type = '{%s}type' % NS_MAP['c']
-
-        components = get_gi_name_components(node)
-        gi_name = '.'.join(components)
-
-        if id_key in node.attrib:
-            TRANSLATED_NAMES['python'][unique_name] = gi_name
-            components[-1] = 'prototype.%s' % components[-1]
-            TRANSLATED_NAMES['javascript'][unique_name] = '.'.join(components)
-            TRANSLATED_NAMES['c'][unique_name] = unique_name
-        elif id_type in node.attrib:
-            TRANSLATED_NAMES['python'][unique_name] = gi_name
-            TRANSLATED_NAMES['javascript'][unique_name] = gi_name
-            TRANSLATED_NAMES['c'][unique_name] = unique_name
-
-        return components, gi_name
-
     def __create_function_symbol (self, node, parent_name):
         name = get_symbol_names(node)[0]
-
-        self.__add_translations(name, node)
 
         gi_params, retval = self.__create_parameters_and_retval (node,
                                                                  name)

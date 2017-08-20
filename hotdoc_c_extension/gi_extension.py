@@ -27,7 +27,6 @@ import os
 
 from lxml import etree
 from collections import defaultdict
-from collections import namedtuple
 
 from hotdoc.core.symbols import *
 from hotdoc.core.extension import Extension, ExtDependency
@@ -86,60 +85,9 @@ DEFAULT_PAGE_COMMENT = """/**
 Logger.register_warning_code('missing-gir-include', BadInclusionException,
                              'gi-extension')
 
+
 Logger.register_warning_code('no-location-indication', InvalidOutputException,
                              'gi-extension')
-
-
-# Describes the type of Return or Parameter symbols
-SymbolTypeDesc = namedtuple('SymbolTypeDesc', [
-    'type_tokens', 'gi_name', 'c_name', 'nesting_depth'])
-
-
-def type_tokens_from_gitype (cur_ns, ptype_name):
-    qs = None
-
-    if ptype_name == 'none':
-        return None
-
-    namespaced = '%s.%s' % (cur_ns, ptype_name)
-    ptype_name = ALL_GI_TYPES.get(namespaced) or ALL_GI_TYPES.get(ptype_name) or ptype_name
-
-    type_link = Link (None, ptype_name, ptype_name)
-
-    tokens = [type_link]
-    tokens += '*'
-
-    return tokens
-
-
-def type_description_from_node(gi_node):
-    ctype_name, gi_name, array_nesting = unnest_type (gi_node)
-
-    cur_ns = get_namespace(gi_node)
-
-    if ctype_name is not None:
-        type_tokens = type_tokens_from_cdecl (ctype_name)
-    else:
-        type_tokens = type_tokens_from_gitype (cur_ns, gi_name)
-
-    namespaced = '%s.%s' % (cur_ns, gi_name)
-    if namespaced in ALL_GI_TYPES:
-        gi_name = namespaced
-
-    return SymbolTypeDesc(type_tokens, gi_name, ctype_name, array_nesting)
-
-
-def is_introspectable(name, language):
-    if name in FUNDAMENTALS[language]:
-        return True
-
-    if name not in TRANSLATED_NAMES[language]:
-        return False
-
-    if name in NON_INTROSPECTABLE_SYMBOLS:
-        return False
-
-    return True
 
 
 class GIExtension(Extension):
@@ -191,7 +139,6 @@ class GIExtension(Extension):
         for gir_file in self.sources:
             gir_root = etree.parse(gir_file).getroot()
             cache_nodes(gir_root, ALL_GIRS)
-            del gir_root
 
     def setup (self):
         commonprefix = os.path.commonprefix(list(self._get_all_sources()))

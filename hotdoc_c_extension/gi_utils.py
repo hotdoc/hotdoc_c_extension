@@ -1,4 +1,5 @@
 import os
+from collections import namedtuple
 import pathlib
 
 from hotdoc.core.links import Link
@@ -16,6 +17,11 @@ else:
 
 
 OUTPUT_LANGUAGES = ['c', 'python', 'javascript']
+
+
+# Describes the type of Return or Parameter symbols
+SymbolTypeDesc = namedtuple('SymbolTypeDesc', [
+    'type_tokens', 'gi_name', 'c_name', 'nesting_depth'])
 
 
 def core_ns(tag):
@@ -137,23 +143,6 @@ def unnest_type (node):
         array_nesting += 1
 
     return ctype_name, type_.attrib.get('name', 'object'), array_nesting
-
-
-def type_tokens_from_cdecl(cdecl):
-    indirection = cdecl.count ('*')
-    qualified_type = cdecl.strip ('*')
-    tokens = []
-    for token in qualified_type.split ():
-        if token in ["const", "restrict", "volatile"]:
-            tokens.append(token + ' ')
-        else:
-            link = Link(None, token, token)
-            tokens.append (link)
-
-    for i in range(indirection):
-        tokens.append ('*')
-
-    return tokens
 
 
 def get_namespace(node):

@@ -47,6 +47,7 @@ from .fundamentals import FUNDAMENTALS
 from hotdoc.parsers.gtk_doc import GtkDocParser
 from .utils.utils import CCommentExtractor
 
+from hotdoc_c_extension.gi_flags import *
 
 Logger.register_warning_code('missing-gir-include', BadInclusionException,
                              'gi-extension')
@@ -56,55 +57,6 @@ Logger.register_warning_code('no-location-indication', InvalidOutputException,
 # Describes the type of Return or Parameter symbols
 SymbolTypeDesc = namedtuple('SymbolTypeDesc', [
     'type_tokens', 'gi_name', 'c_name', 'nesting_depth'])
-
-class Flag (object):
-    def __init__ (self, nick, link):
-        self.nick = nick
-        self.link = link
-
-
-class RunLastFlag (Flag):
-    def __init__(self):
-        Flag.__init__ (self, "Run Last",
-                "https://developer.gnome.org/gobject/unstable/gobject-Signals.html#G-SIGNAL-RUN-LAST:CAPS")
-
-
-class RunFirstFlag (Flag):
-    def __init__(self):
-        Flag.__init__ (self, "Run First",
-                "https://developer.gnome.org/gobject/unstable/gobject-Signals.html#G-SIGNAL-RUN-FIRST:CAPS")
-
-
-class RunCleanupFlag (Flag):
-    def __init__(self):
-        Flag.__init__ (self, "Run Cleanup",
-                "https://developer.gnome.org/gobject/unstable/gobject-Signals.html#G-SIGNAL-RUN-CLEANUP:CAPS")
-
-
-class NoHooksFlag (Flag):
-    def __init__(self):
-        Flag.__init__(self, "No Hooks",
-"https://developer.gnome.org/gobject/unstable/gobject-Signals.html#G-SIGNAL-NO-HOOKS:CAPS")
-
-
-class WritableFlag (Flag):
-    def __init__(self):
-        Flag.__init__ (self, "Write", None)
-
-
-class ReadableFlag (Flag):
-    def __init__(self):
-        Flag.__init__ (self, "Read", None)
-
-
-class ConstructFlag (Flag):
-    def __init__(self):
-        Flag.__init__ (self, "Construct", None)
-
-
-class ConstructOnlyFlag (Flag):
-    def __init__(self):
-        Flag.__init__ (self, "Construct Only", None)
 
 
 DESCRIPTION=\

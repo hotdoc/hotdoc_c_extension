@@ -74,14 +74,12 @@ class CCommentExtractor:
             return_tag = comment.tags.get ('returns')
             if return_tag:
                 return_value = [ReturnItemSymbol ()]
-                return_value[0].add_extension_attribute ('gi-extension', 'owner_name', name)
 
         parameters = []
 
         if comment:
             for param_name in comment.params:
                 parameter = ParameterSymbol (argname=param_name)
-                parameter.add_extension_attribute ('gi-extension', 'owner_name', name)
                 parameters.append (parameter)
 
         sym = self.extension.get_or_create_symbol(

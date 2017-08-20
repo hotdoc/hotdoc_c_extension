@@ -241,7 +241,6 @@ class GIExtension(Extension):
             Extension.write_out_sitemap (self, lopath)
         GIFormatter.sitemap_language = None
 
-    # We implement filtering of some symbols
     def get_or_create_symbol(self, *args, **kwargs):
         args = list(args)
         node = None
@@ -382,16 +381,13 @@ class GIExtension(Extension):
             tokens = type_tokens_from_cdecl (type_)
             qtype = QualifiedSymbol(type_tokens=tokens)
 
-            self.add_attrs(qtype, owner_name=struct_name)
             member = self.get_or_create_symbol(
                 FieldSymbol, field,
                 member_name=field_name, qtype=qtype,
                 filename=filename, display_name=name,
                 unique_name=name, parent_name=parent_name,
                 aliases=aliases)
-            self.add_attrs(member, owner_name=struct_name,
-                                    gi_name=type_gi_name,
-                                    in_union=in_union)
+            self.add_attrs(member, gi_name=type_gi_name, in_union=in_union)
             members.append(member)
 
         if is_union and struct_name:
@@ -473,7 +469,7 @@ class GIExtension(Extension):
 
         self.add_attrs(symbol, parameters=in_parameters)
 
-    def __create_parameter_symbol (self, gi_parameter, owner_name):
+    def __create_parameter_symbol (self, gi_parameter):
         param_name = gi_parameter.attrib['name']
 
         type_desc = type_description_from_node(gi_parameter)
@@ -482,12 +478,11 @@ class GIExtension(Extension):
             direction = 'in'
 
         res = ParameterSymbol(argname=param_name, type_tokens=type_desc.type_tokens)
-        self.add_attrs(res, gi_name=type_desc.gi_name, owner_name=owner_name,
-                                direction=direction)
+        self.add_attrs(res, gi_name=type_desc.gi_name, direction=direction)
 
         return res, direction
 
-    def __create_return_value_symbol (self, gi_retval, out_parameters, owner_name):
+    def __create_return_value_symbol (self, gi_retval, out_parameters):
         type_desc = type_description_from_node(gi_retval)
 
         if type_desc.gi_name == 'none':
@@ -495,8 +490,7 @@ class GIExtension(Extension):
         else:
             ret_item = ReturnItemSymbol(type_tokens=type_desc.type_tokens)
 
-            self.add_attrs(ret_item, gi_name=type_desc.gi_name,
-                                    owner_name=owner_name)
+            self.add_attrs(ret_item, gi_name=type_desc.gi_name)
 
         res = [ret_item]
 
@@ -504,12 +498,11 @@ class GIExtension(Extension):
             ret_item = ReturnItemSymbol(type_tokens=out_param.input_tokens,
                     name=out_param.argname)
 
-            self.add_attrs(ret_item, owner_name=owner_name)
             res.append(ret_item)
 
         return res
 
-    def __create_parameters_and_retval (self, node, owner_name):
+    def __create_parameters_and_retval (self, node):
         gi_parameters = node.find('{http://www.gtk.org/introspection/core/1.0}parameters')
 
         if gi_parameters is None:
@@ -523,28 +516,24 @@ class GIExtension(Extension):
         parameters = []
 
         if instance_param is not None:
-            param, direction = self.__create_parameter_symbol (instance_param,
-                                                               owner_name)
+            param, direction = self.__create_parameter_symbol (instance_param)
             parameters.append (param)
 
         out_parameters = []
         for gi_parameter in gi_parameters:
-            param, direction = self.__create_parameter_symbol (gi_parameter,
-                                                               owner_name)
+            param, direction = self.__create_parameter_symbol (gi_parameter)
             parameters.append (param)
             if direction != 'in':
                 out_parameters.append (param)
 
         retval = node.find('{http://www.gtk.org/introspection/core/1.0}return-value')
-        retval = self.__create_return_value_symbol (retval, out_parameters,
-                                                    owner_name)
+        retval = self.__create_return_value_symbol (retval, out_parameters)
 
         return (parameters, retval)
 
     def __create_callback_symbol (self, node, parent_name):
         name = node.attrib[c_ns('type')]
-        parameters, retval = self.__create_parameters_and_retval (node,
-                                                                  name)
+        parameters, retval = self.__create_parameters_and_retval (node)
 
         filename = self.__get_symbol_filename(name)
         sym = self.get_or_create_symbol(
@@ -574,22 +563,19 @@ class GIExtension(Extension):
     def __create_signal_symbol (self, node, parent_name):
         unique_name, name, klass_name = get_symbol_names(node)
 
-        parameters, retval = self.__create_parameters_and_retval (node,
-                                                                  unique_name)
+        parameters, retval = self.__create_parameters_and_retval (node)
 
         parent_node = node.getparent()
         parent_gi_name = get_gi_name(parent_node)
         parent_link = Link(None, parent_name, parent_name)
 
         instance_param = ParameterSymbol(argname='self', type_tokens=[parent_link, '*'])
-        self.add_attrs (instance_param, gi_name=parent_gi_name,
-            owner_name=unique_name, direction='in')
+        self.add_attrs (instance_param, gi_name=parent_gi_name, direction='in')
         parameters.insert (0, instance_param)
 
         udata_link = Link(None, 'gpointer', 'gpointer')
         udata_param = ParameterSymbol(argname='user_data', type_tokens=[udata_link])
-        self.add_attrs (udata_param, gi_name='gpointer',
-            owner_name=unique_name, direction='in')
+        self.add_attrs (udata_param, gi_name='gpointer', direction='in')
         parameters.append (udata_param)
 
         res = self.get_or_create_symbol(SignalSymbol, node,
@@ -626,7 +612,6 @@ class GIExtension(Extension):
         type_desc = type_description_from_node(node)
         type_ = QualifiedSymbol(type_tokens=type_desc.type_tokens)
         self.add_attrs(type_, gi_name=type_desc.gi_name,
-                                owner_name=unique_name,
                                 type_desc=type_desc)
 
         flags = []
@@ -672,8 +657,7 @@ class GIExtension(Extension):
                             description=param_comment.description,
                             annotations=param_comment.annotations))
 
-        parameters, retval = self.__create_parameters_and_retval (node,
-                                                                  unique_name)
+        parameters, retval = self.__create_parameters_and_retval (node)
         symbol = self.get_or_create_symbol(VFunctionSymbol, node,
                 parameters=parameters,
                 return_value=retval, display_name=name,
@@ -691,8 +675,7 @@ class GIExtension(Extension):
 
         type_desc = type_description_from_node(node)
         aliased_type = QualifiedSymbol(type_tokens=type_desc.type_tokens)
-        self.add_attrs(aliased_type, owner_name=name,
-                                type_desc=type_desc)
+        self.add_attrs(aliased_type, type_desc=type_desc)
         filename = self.__get_symbol_filename(name)
 
         alias_link = [l for l in type_desc.type_tokens if isinstance(l, Link)]
@@ -813,8 +796,7 @@ class GIExtension(Extension):
     def __create_function_symbol (self, node, parent_name):
         name = get_symbol_names(node)[0]
 
-        gi_params, retval = self.__create_parameters_and_retval (node,
-                                                                 name)
+        gi_params, retval = self.__create_parameters_and_retval (node)
 
         if node.tag.endswith ('method'):
             if node.getparent().attrib.get(glib_ns('is-gtype-struct-for')):

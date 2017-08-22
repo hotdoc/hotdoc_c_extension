@@ -51,9 +51,6 @@ def __find_gir_file(gir_name, all_girs):
 __TRANSLATED_NAMES = {l: {} for l in OUTPUT_LANGUAGES}
 
 
-__NON_INTROSPECTABLE_SYMBOLS = set()
-
-
 def get_field_c_name_components(node, components):
     parent = node.getparent()
     if parent.tag != core_ns('namespace'):
@@ -74,34 +71,36 @@ def make_translations(unique_name, node):
     when linking to test_greeter_greet() we want to display
     Test.Greeter.greet
     '''
+    introspectable = not node.attrib.get('introspectable') == '0'
 
     if c_ns('identifier') in node.attrib:
-        components = get_gi_name_components(node)
-        gi_name = '.'.join(components)
-        __TRANSLATED_NAMES['python'][unique_name] = gi_name
-        components[-1] = 'prototype.%s' % components[-1]
-        __TRANSLATED_NAMES['javascript'][unique_name] = '.'.join(components)
         __TRANSLATED_NAMES['c'][unique_name] = unique_name
+        if introspectable:
+            components = get_gi_name_components(node)
+            gi_name = '.'.join(components)
+            __TRANSLATED_NAMES['python'][unique_name] = gi_name
+            components[-1] = 'prototype.%s' % components[-1]
+            __TRANSLATED_NAMES['javascript'][unique_name] = '.'.join(components)
     elif c_ns('type') in node.attrib:
         components = get_gi_name_components(node)
         gi_name = '.'.join(components)
-        __TRANSLATED_NAMES['python'][unique_name] = gi_name
-        __TRANSLATED_NAMES['javascript'][unique_name] = gi_name
         __TRANSLATED_NAMES['c'][unique_name] = unique_name
+        if introspectable:
+            __TRANSLATED_NAMES['javascript'][unique_name] = gi_name
+            __TRANSLATED_NAMES['python'][unique_name] = gi_name
     elif node.tag == core_ns('field'):
         components = []
         get_field_c_name_components(node, components)
         display_name = '.'.join(components[1:])
-        __TRANSLATED_NAMES['python'][unique_name] = display_name
-        __TRANSLATED_NAMES['javascript'][unique_name] = display_name
         __TRANSLATED_NAMES['c'][unique_name] = display_name
+        if introspectable:
+            __TRANSLATED_NAMES['javascript'][unique_name] = display_name
+            __TRANSLATED_NAMES['python'][unique_name] = display_name
     else:
-        __TRANSLATED_NAMES['python'][unique_name] = node.attrib.get('name')
-        __TRANSLATED_NAMES['javascript'][unique_name] = node.attrib.get('name')
         __TRANSLATED_NAMES['c'][unique_name] = node.attrib.get('name')
-
-    if node.attrib.get('introspectable') == '0':
-        __NON_INTROSPECTABLE_SYMBOLS.add(unique_name)
+        if introspectable:
+            __TRANSLATED_NAMES['python'][unique_name] = node.attrib.get('name')
+            __TRANSLATED_NAMES['javascript'][unique_name] = node.attrib.get('name')
 
 
 def get_translation(unique_name, language):
@@ -296,9 +295,6 @@ def is_introspectable(name, language):
         return True
 
     if name not in __TRANSLATED_NAMES[language]:
-        return False
-
-    if name in __NON_INTROSPECTABLE_SYMBOLS:
         return False
 
     return True

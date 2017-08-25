@@ -17,6 +17,11 @@
 # along with this library.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
+import html
+from wheezy.template.engine import Engine
+from wheezy.template.ext.core import CoreExtension
+from wheezy.template.ext.code import CodeExtension
+from wheezy.template.loader import FileLoader
 from hotdoc.core.formatter import Formatter
 from hotdoc.core.symbols import *
 import lxml.etree
@@ -26,11 +31,10 @@ from hotdoc_c_extension.gi_node_cache import ALL_GI_TYPES
 
 class GIFormatter(Formatter):
     sitemap_language = None
+    engine = None
 
     def __init__(self, gi_extension):
-        module_path = os.path.dirname(__file__)
-        searchpath = [os.path.join(module_path, "templates")]
-        Formatter.__init__(self, gi_extension, searchpath)
+        Formatter.__init__(self, gi_extension)
         self._order_by_parent = True
 
     def format_annotations (self, annotations):
@@ -272,3 +276,16 @@ class GIFormatter(Formatter):
     def get_output_folder(self, page):
         lang_path = GIFormatter.sitemap_language or page.meta['extra']['gi-language']
         return os.path.join(super().get_output_folder(page), lang_path)
+
+    def get_template(self, name):
+        return GIFormatter.engine.get_template(name)
+
+    def parse_toplevel_config(self, config):
+        super().parse_toplevel_config(config)
+        if GIFormatter.engine is None:
+            module_path = os.path.dirname(__file__)
+            searchpath = [os.path.join(module_path, "templates")] + Formatter.engine.loader.searchpath
+            GIFormatter.engine = Engine(
+                    loader=FileLoader(searchpath, encoding='UTF-8'),
+                    extensions=[CoreExtension(), CodeExtension()])
+            GIFormatter.engine.global_vars.update({'e': html.escape})

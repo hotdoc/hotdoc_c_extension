@@ -159,7 +159,7 @@ class GIExtension(Extension):
         self.__scan_comments()
         self.__scan_sources()
         self.__create_macro_symbols()
-        self.app.link_resolver.resolving_link_signal.connect_after(self.__translate_link_ref, self.languages[0])
+        self.app.link_resolver.resolving_link_signal.connect_after(self.__translate_link_ref, 'default')
 
     def format_page(self, page, link_resolver, output):
         link_resolver.get_link_signal.connect(self.search_online_links)
@@ -827,14 +827,14 @@ class GIExtension(Extension):
 
         return True
 
-    def __translate_link_ref(self, link, language):
+    def __translate_ref(self, link, language):
         fund = FUNDAMENTALS[language].get(link.id_)
         if fund:
             return fund.ref
 
         aliased_link = ALIASED_LINKS[language].get(link.id_)
         if aliased_link:
-            return self.__translate_link_ref(aliased_link, language)
+            return self.__translate_ref(aliased_link, language)
 
         page = self.project.get_page_for_symbol(link.id_)
         if page:
@@ -853,7 +853,7 @@ class GIExtension(Extension):
 
         return None
 
-    def __translate_link_title(self, link, language):
+    def __translate_title(self, link, language):
         fund = FUNDAMENTALS[language].get(link.id_)
         if fund:
             return fund._title
@@ -874,13 +874,34 @@ class GIExtension(Extension):
 
         return None
 
+    def __translate_link_ref(self, link, language):
+        if language == 'default':
+            actual_language = 'c'
+        else:
+            actual_language = language
+
+        ref = self.__translate_ref(link, actual_language)
+        if ref is None:
+            return None
+
+        extra_attrs = {}
+        if language == 'default':
+            extra_attrs['data-gi-href-python'] = self.__translate_ref(link, 'python') or ref
+            extra_attrs['data-gi-href-javascript'] = self.__translate_ref(link, 'javascript') or ref
+            extra_attrs['data-gi-title-python'] = self.__translate_title(link, 'python')
+            extra_attrs['data-gi-title-javascript'] = self.__translate_title(link, 'javascript')
+        return ref, extra_attrs
+
+    def __translate_link_title(self, link, language):
+        return self.__translate_title(link, language)
+
     def __setup_language (self, language, prev_l):
         if prev_l:
             Link.resolving_title_signal.disconnect(self.__translate_link_title,
                                                    prev_l)
             self.app.link_resolver.resolving_link_signal.disconnect(self.__translate_link_ref, prev_l)
         else:
-            self.app.link_resolver.resolving_link_signal.disconnect(self.__translate_link_ref, self.languages[0])
+            self.app.link_resolver.resolving_link_signal.disconnect(self.__translate_link_ref, 'default')
 
 
         if language is not None:
@@ -888,5 +909,4 @@ class GIExtension(Extension):
                                                 language)
             self.app.link_resolver.resolving_link_signal.connect(self.__translate_link_ref, language)
         else:
-            self.app.link_resolver.resolving_link_signal.connect_after(self.__translate_link_ref, self.languages[0])
-
+            self.app.link_resolver.resolving_link_signal.connect_after(self.__translate_link_ref, 'default')

@@ -38,7 +38,6 @@ from hotdoc.utils.loggable import warn, Logger
 from hotdoc.utils.utils import OrderedSet
 
 from .gi_formatter import GIFormatter
-from .gi_annotation_parser import GIAnnotationParser
 from .fundamentals import FUNDAMENTALS
 
 from hotdoc.parsers.gtk_doc import GtkDocParser
@@ -51,6 +50,7 @@ from hotdoc_c_extension.gi_node_cache import (
         get_klass_children, cache_nodes, type_description_from_node,
         is_introspectable)
 from hotdoc_c_extension.gi_gtkdoc_links import GTKDOC_HREFS
+from hotdoc_c_extension.gi_symbols import GIClassSymbol
 
 
 DESCRIPTION=\
@@ -102,7 +102,6 @@ class GIExtension(Extension):
 
         self.languages = None
 
-        self.__annotation_parser = GIAnnotationParser()
         self.__current_output_filename = None
         self.__class_gtype_structs = {}
         self.__default_page = DEFAULT_PAGE
@@ -146,7 +145,13 @@ class GIExtension(Extension):
             gir_root = etree.parse(gir_file).getroot()
             cache_nodes(gir_root, ALL_GIRS)
 
+    def __formatting_page(self, formatter, page):
+        if ALL_GIRS:
+            page.meta['extra']['gi-languages'] = ['c', 'python', 'javascript']
+
     def setup (self):
+        for ext in self.project.extensions.values():
+            ext.formatter.formatting_page_signal.connect(self.__formatting_page)
         commonprefix = os.path.commonprefix(list(self._get_all_sources()))
         self.__default_page = os.path.join(os.path.dirname(commonprefix),
             DEFAULT_PAGE)
@@ -166,34 +171,16 @@ class GIExtension(Extension):
 
         prev_l = None
         page.meta['extra']['gi-languages'] = ','.join(self.languages)
-        for l in self.languages:
-            self.formatter.formatting_symbol_signal.connect(self.__formatting_symbol, l)
-            page.meta['extra']['gi-language'] = l
-            self.__setup_language (l, prev_l)
-            Extension.format_page (self, page, link_resolver, output)
-            prev_l = l
-            self.formatter.formatting_symbol_signal.disconnect(self.__formatting_symbol, l)
-
-        self.__setup_language(None, l)
+        page.meta['extra']['gi-language'] = 'c'
+        Extension.format_page (self, page, link_resolver, output)
         page.meta['extra']['gi-language'] = self.languages[0]
 
         link_resolver.get_link_signal.disconnect(self.search_online_links)
 
     def write_out_page(self, output, page):
         prev_l = None
-        for l in self.languages:
-            page.meta['extra']['gi-language'] = l
-            self.__setup_language (l, prev_l)
-            Extension.write_out_page (self, output, page)
-            prev_l = l
-        self.__setup_language(None, l)
-
-    def write_out_sitemap(self, opath):
-        for l in self.languages:
-            GIFormatter.sitemap_language = l
-            lopath = os.path.join(os.path.dirname(opath), '%s-%s' % (l, os.path.basename(opath)))
-            Extension.write_out_sitemap (self, lopath)
-        GIFormatter.sitemap_language = None
+        page.meta['extra']['gi-language'] = 'c'
+        Extension.write_out_page (self, output, page)
 
     def get_or_create_symbol(self, *args, **kwargs):
         args = list(args)
@@ -473,7 +460,7 @@ class GIExtension(Extension):
         members = []
         for field in node.findall(core_ns('member')):
             member = self.get_or_create_symbol(
-                Symbol, node, display_name=field.attrib[c_ns('identifier')],
+                EnumMemberSymbol, field, display_name=field.attrib[c_ns('identifier')],
                 filename=filename)
             member.enum_value = field.attrib['value']
             members.append(member)
@@ -639,11 +626,11 @@ class GIExtension(Extension):
             return
 
         filename = self.__find_structure_pagename(node, unique_name,
-                                                  symbol_type == ClassSymbol)
+                                                  symbol_type == GIClassSymbol)
 
         self.__current_output_filename = filename
         parent_name = unique_name
-        if symbol_type == ClassSymbol:
+        if symbol_type == GIClassSymbol:
             res = self.__create_class_symbol(node, gi_name,
                                             klass_name,
                                             unique_name,
@@ -664,7 +651,7 @@ class GIExtension(Extension):
                                               class_symbol.unique_name if class_symbol else None)
 
             if class_symbol:
-                class_symbol.extra['class_structure'] = res
+                class_symbol.class_struct_symbol = res
         else:  # Interface
             res = self.__create_interface_symbol(node, unique_name, filename)
             class_struct =  node.attrib.get(glib_ns('type-struct'))
@@ -689,7 +676,7 @@ class GIExtension(Extension):
                                                          klass_name,
                                                          unique_name)
 
-        res = self.get_or_create_symbol(ClassSymbol, node,
+        res = self.get_or_create_symbol(GIClassSymbol, node,
                                         hierarchy=hierarchy,
                                         children=children,
                                         display_name=klass_name,
@@ -707,13 +694,20 @@ class GIExtension(Extension):
             node, filename, struct_name,
             parent_name=struct_name)
 
-        return self.get_or_create_symbol(StructSymbol, node,
-                                  display_name=struct_name,
-                                  unique_name=struct_name,
-                                  anonymous=False,
-                                  filename=filename,
-                                  members=members,
-                                  parent_name=parent_name)
+        if not parent_name:
+            return self.get_or_create_symbol(StructSymbol, node,
+                                      display_name=struct_name,
+                                      unique_name=struct_name,
+                                      anonymous=False,
+                                      filename=filename,
+                                      members=members)
+        else:
+            res = StructSymbol()
+            res.display_name = struct_name
+            res.unique_name = struct_name
+            res.filename = filename
+            res.members = members
+            return res
 
     def __create_interface_symbol (self, node, unique_name, filename):
         return self.get_or_create_symbol(InterfaceSymbol, node,
@@ -766,7 +760,7 @@ class GIExtension(Extension):
         if 'moved-to' in node.attrib:
             return False
         if node.tag == core_ns('class'):
-            self.__create_structure(ClassSymbol, node, gi_name)
+            self.__create_structure(GIClassSymbol, node, gi_name)
         elif node.tag in (core_ns('function'), core_ns('method'), core_ns('constructor')):
             self.__create_function_symbol(node, parent_name)
         elif node.tag == core_ns('virtual-method'):
@@ -799,34 +793,6 @@ class GIExtension(Extension):
             self.__scan_node(root)
 
     # Format-time private methods
-
-    def __add_annotations (self, formatter, symbol):
-        if self.get_attr(symbol, 'language') == 'c':
-            annotations = self.__annotation_parser.make_annotations(symbol)
-
-            # FIXME: OK this is format time but still seems strange
-            if annotations:
-                extra_content = formatter.format_annotations (annotations)
-                symbol.extension_contents['Annotations'] = extra_content
-        else:
-            symbol.extension_contents.pop('Annotations', None)
-
-    def __formatting_symbol(self, formatter, symbol, language):
-        self.add_attrs(symbol, language=language)
-
-        if isinstance(symbol, (ReturnItemSymbol, ParameterSymbol)):
-            self.__add_annotations (formatter, symbol)
-
-        if isinstance (symbol, QualifiedSymbol):
-            return True
-
-        # We discard symbols at formatting time because they might be exposed
-        # in other languages
-        if language != 'c':
-            return is_introspectable(symbol.unique_name, language)
-
-        return True
-
     def __translate_ref(self, link, language):
         fund = FUNDAMENTALS[language].get(link.id_)
         if fund:
@@ -840,13 +806,7 @@ class GIExtension(Extension):
         if page:
             if page.extension_name != self.extension_name:
                 return None
-
-            project = self.project.get_project_for_page (page)
-            if link.ref and language != 'c' and not is_introspectable(link.id_, language):
-                return insert_language(link.ref, 'c', project)
-
-            res = insert_language(link.ref, language, project)
-            return res
+            return link.ref
 
         if link.ref is None:
             return GTKDOC_HREFS.get(link.id_)
@@ -895,7 +855,7 @@ class GIExtension(Extension):
     def __translate_link_title(self, link, language):
         return self.__translate_title(link, language)
 
-    def __setup_language (self, language, prev_l):
+    def setup_language (self, language, prev_l):
         if prev_l:
             Link.resolving_title_signal.disconnect(self.__translate_link_title,
                                                    prev_l)

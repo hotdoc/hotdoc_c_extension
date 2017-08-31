@@ -73,7 +73,15 @@ def make_translations(unique_name, node):
     '''
     introspectable = not node.attrib.get('introspectable') == '0'
 
-    if c_ns('identifier') in node.attrib:
+    if node.tag == core_ns('member'):
+        __TRANSLATED_NAMES['c'][unique_name] = unique_name
+        if introspectable:
+            components = get_gi_name_components(node)
+            components[-1] = components[-1].upper()
+            gi_name = '.'.join(components)
+            __TRANSLATED_NAMES['python'][unique_name] = gi_name
+            __TRANSLATED_NAMES['javascript'][unique_name] = gi_name
+    elif c_ns('identifier') in node.attrib:
         __TRANSLATED_NAMES['c'][unique_name] = unique_name
         if introspectable:
             components = get_gi_name_components(node)

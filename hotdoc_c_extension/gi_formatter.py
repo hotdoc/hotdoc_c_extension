@@ -26,7 +26,9 @@ from hotdoc.core.formatter import Formatter
 from hotdoc.core.symbols import *
 import lxml.etree
 from .fundamentals import FUNDAMENTALS
-from hotdoc_c_extension.gi_node_cache import ALL_GI_TYPES
+from hotdoc_c_extension.gi_node_cache import ALL_GI_TYPES, is_introspectable
+from hotdoc_c_extension.gi_symbols import GIClassSymbol
+from hotdoc_c_extension.gi_annotation_parser import GIAnnotationParser
 
 
 class GIFormatter(Formatter):
@@ -36,10 +38,54 @@ class GIFormatter(Formatter):
     def __init__(self, gi_extension):
         Formatter.__init__(self, gi_extension)
         self._order_by_parent = True
+        self._symbol_formatters.update(
+                {GIClassSymbol: self._format_class_symbol})
+        self._ordering.insert(self._ordering.index(ClassSymbol) + 1, GIClassSymbol)
+        self.__annotation_parser = GIAnnotationParser()
 
     def format_annotations (self, annotations):
         template = self.engine.get_template('gi_annotations.html')
         return template.render ({'annotations': annotations})
+
+    def __add_attrs(self, symbol, **kwargs):
+        if not symbol:
+            return
+        self.extension.add_attrs(symbol, **kwargs)
+        for csym in symbol.get_children_symbols():
+            self.__add_attrs(csym, **kwargs)
+
+    def __wrap_in_language(self, symbol, c_doc, python_doc, js_doc):
+        template = self.get_template('symbol_language_wrapper.html')
+        res = template.render(
+                {'symbol': symbol,
+                 'c_doc': c_doc,
+                 'python_doc': python_doc,
+                 'js_doc': js_doc})
+        return res
+
+    def _format_symbol (self, symbol):
+        if isinstance(symbol, (QualifiedSymbol, FieldSymbol, EnumMemberSymbol)):
+            return Formatter._format_symbol(self, symbol)
+
+        self.extension.setup_language('c', None)
+        self.__add_attrs(symbol, language='c')
+
+        c_out = Formatter._format_symbol(self, symbol)
+        python_out = None
+        js_out = None
+
+        self.extension.setup_language('python', 'c')
+        if is_introspectable(symbol.unique_name, 'python'):
+            self.__add_attrs(symbol, language='python')
+            python_out = Formatter._format_symbol(self, symbol)
+
+        self.extension.setup_language('javascript', 'python')
+        if is_introspectable(symbol.unique_name, 'javascript'):
+            self.__add_attrs(symbol, language='javascript')
+            js_out = Formatter._format_symbol(self, symbol)
+
+        self.extension.setup_language(None, 'javascript')
+        return self.__wrap_in_language(symbol, c_out, python_out, js_out)
 
     def _format_flags (self, flags):
         template = self.engine.get_template('gi_flags.html')
@@ -74,6 +120,21 @@ class GIFormatter(Formatter):
 
         return Formatter._format_type_tokens (self, symbol, type_tokens)
 
+    def __add_annotations (self, symbol):
+        if self.extension.get_attr(symbol, 'language') == 'c':
+            annotations = self.__annotation_parser.make_annotations(symbol)
+
+            # FIXME: OK this is format time but still seems strange
+            if annotations:
+                extra_content = self.format_annotations (annotations)
+                symbol.extension_contents['Annotations'] = extra_content
+        else:
+            symbol.extension_contents.pop('Annotations', None)
+
+    def _format_return_item_symbol(self, symbol):
+        self.__add_annotations(symbol)
+        return Formatter._format_return_item_symbol (self, symbol)
+
     def _format_return_value_symbol (self, *args):
         retval = args[0]
         is_void = retval[0] is None or \
@@ -103,12 +164,13 @@ class GIFormatter(Formatter):
         return Formatter._format_return_value_symbol (self, *args)
 
     def _format_parameter_symbol (self, parameter):
+        self.__add_annotations(parameter)
         language = parameter.get_extension_attribute(self.extension.extension_name, 'language')
         if language != 'c':
             direction = parameter.get_extension_attribute ('gi-extension',
                     'direction')
             if direction == 'out':
-                return (None, False)
+                return None
 
             parameter.extension_contents['type-link'] = self._format_linked_symbol (parameter)
         else:
@@ -202,21 +264,19 @@ class GIFormatter(Formatter):
         template = self.engine.get_template ("python_compound.html")
         out = template.render ({"symbol": struct,
                                 "members_list": members_list})
-        return (out, False)
+        return out
 
     def _format_class_symbol (self, klass):
         saved_raw_text = klass.raw_text
         if klass.get_extension_attribute(self.extension.extension_name, 'language') != 'c':
             klass.raw_text = None
-        out = list(Formatter._format_class_symbol(self, klass))
+        out = Formatter._format_class_symbol(self, klass)
 
         if klass.get_extension_attribute(self.extension.extension_name, 'language') == 'c':
             # Render class structure if available.
-            klass_struct =  klass.extra.get('class_structure')
-            if klass_struct:
-                klass_struct.resolve_links(self.extension.app.link_resolver)
-                out[0] += self.format_symbol(klass_struct,
-                                             self.extension.app.link_resolver)
+            if klass.class_struct_symbol:
+                out += '<h3>Class structure</h3>'
+                out += klass.class_struct_symbol.detailed_description
 
         klass.raw_text = saved_raw_text
         return out
@@ -230,7 +290,7 @@ class GIFormatter(Formatter):
         out = template.render ({'symbol': constant,
                                 'definition': None,
                                 'constant': constant})
-        return (out, False)
+        return out
 
     def _format_comment(self, comment, link_resolver):
         ast = comment.extension_attrs['gi-extension']['ast']
@@ -253,7 +313,7 @@ class GIFormatter(Formatter):
                          is_pointer=False):
         language = callable_.get_extension_attribute(self.extension.extension_name, 'language')
         if language == 'python' and isinstance(callable_, ClassMethodSymbol):
-            return (None, None)
+            return None
 
         return super()._format_callable(callable_, callable_type, title, is_pointer)
 
@@ -264,18 +324,12 @@ class GIFormatter(Formatter):
 
         return super()._format_property_symbol(prop)
 
-
     def _format_alias(self, alias):
         language = alias.get_extension_attribute(self.extension.extension_name, 'language')
         if language == 'c':
             return super()._format_alias(alias)
 
-        return (None, None)
-
-
-    def get_output_folder(self, page):
-        lang_path = GIFormatter.sitemap_language or page.meta['extra']['gi-language']
-        return os.path.join(super().get_output_folder(page), lang_path)
+        return None
 
     def get_template(self, name):
         return GIFormatter.engine.get_template(name)

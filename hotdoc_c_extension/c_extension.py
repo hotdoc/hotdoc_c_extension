@@ -427,7 +427,7 @@ class ClangScanner(object):
         for member in node.get_children():
             member_value = member.enum_value
             # FIXME: this is pretty much a macro symbol ?
-            member = self.__doc_db.get_or_create_symbol(Symbol, display_name=member.spelling,
+            member = self.__doc_db.get_or_create_symbol(EnumMemberSymbol, display_name=member.spelling,
                     filename=str(member.location.file),
                     lineno=member.location.line)
             member.enum_value = member_value

@@ -17,52 +17,10 @@
 
 from hotdoc.core.symbols import *
 
-class GISymbolIface:
-    def __init__(self, children):
-        self._children = children or {}
-
-    @staticmethod
-    def from_tokens(type_, c_tokens, langs_tokens, **kwargs):
-        children = {}
-        for lang, tokens in langs_tokens.items():
-            if tokens:
-                if lang != 'c':
-                    tokens = [tok for tok in tokens if tok not in ['*',
-                                                                   'const ',
-                                                                   'restrict ',
-                                                                   'volatile ']]
-
-                children[lang] = type_(type_tokens=tokens, children=None, **kwargs)
-
-        return type_(type_tokens=c_tokens, children=children, **kwargs)
+class GIClassSymbol(ClassSymbol):
+    def __init__(self, **kwargs):
+        self.class_struct_symbol = None
+        ClassSymbol.__init__(self, **kwargs)
 
     def get_children_symbols(self):
-        return self._children.values()
-
-    def get(self, language):
-        return self._children.get(language, self)
-
-
-class GIQualifiedSymbol(GISymbolIface, QualifiedSymbol):
-    def __init__(self, *args, **kwargs):
-        GISymbolIface.__init__(self, kwargs.pop('children'))
-        QualifiedSymbol.__init__(self, *args, **kwargs)
-
-
-class GIReturnItemSymbol(GISymbolIface, ReturnItemSymbol):
-    def __init__(self, *args, **kwargs):
-        GISymbolIface.__init__(self, kwargs.pop('children'))
-        ReturnItemSymbol.__init__(self, *args, **kwargs)
-
-class GIParameterSymbol(GISymbolIface, ParameterSymbol):
-    def __init__(self, *args, **kwargs):
-        GISymbolIface.__init__(self, kwargs.pop('children'))
-        ParameterSymbol.__init__(self, *args, **kwargs)
-
-    def get_lang_tokens(self):
-        res = {}
-        for lang, child in self._children.items():
-            if child.input_tokens:
-                res[lang] = child.input_tokens
-
-        return res
+        return [self.class_struct_symbol] + super().get_children_symbols()

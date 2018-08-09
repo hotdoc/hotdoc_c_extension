@@ -262,7 +262,8 @@ class GIExtension(Extension):
                 if field_name_prefix is None:
                     field_name_prefix = field.attrib['name']
                 else:
-                    field_name_prefix = '%s.%s' % (field_name_prefix, field.attrib['name'])
+                    if 'name' in field.attrib:
+                        field_name_prefix = '%s.%s' % (field_name_prefix, field.attrib['name'])
 
                 new_union = field.tag == core_ns('union')
                 union_members = self.__get_structure_members(

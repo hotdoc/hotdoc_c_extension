@@ -55,7 +55,10 @@ def get_field_c_name_components(node, components):
     parent = node.getparent()
     if parent.tag != core_ns('namespace'):
         get_field_c_name_components(parent, components)
-    components.append(node.attrib.get(c_ns('type'), node.attrib['name']))
+    component = node.attrib.get(c_ns('type'), node.attrib.get('name'))
+
+    if component:
+        components.append(component)
 
 
 def get_field_c_name(node):

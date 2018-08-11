@@ -107,6 +107,18 @@ def make_translations(unique_name, node):
         if introspectable:
             __TRANSLATED_NAMES['javascript'][unique_name] = display_name
             __TRANSLATED_NAMES['python'][unique_name] = display_name
+    elif node.tag == core_ns('virtual-method'):
+        display_name = node.attrib['name']
+        __TRANSLATED_NAMES['c'][unique_name] = display_name
+        if introspectable:
+            __TRANSLATED_NAMES['javascript'][unique_name] = 'vfunc_%s' % display_name
+            __TRANSLATED_NAMES['python'][unique_name] = 'do_%s' % display_name
+    elif node.tag == core_ns('property'):
+        display_name = node.attrib['name']
+        __TRANSLATED_NAMES['c'][unique_name] = display_name
+        if introspectable:
+            __TRANSLATED_NAMES['javascript'][unique_name] = display_name
+            __TRANSLATED_NAMES['python'][unique_name] = display_name.replace('-', '_')
     else:
         __TRANSLATED_NAMES['c'][unique_name] = node.attrib.get('name')
         if introspectable:

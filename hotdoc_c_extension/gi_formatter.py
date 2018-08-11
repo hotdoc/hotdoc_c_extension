@@ -234,17 +234,6 @@ class GIFormatter(Formatter):
 
         return res
 
-    def _format_vfunction_symbol (self, vmethod):
-        title = vmethod.link.title
-        language = vmethod.get_extension_attribute(self.extension.extension_name, 'language')
-        if language == 'python':
-            vmethod.link.title = 'do_%s' % vmethod._make_name()
-            title = 'do_%s' % title
-        elif language == 'javascript':
-            vmethod.link.title = '%s::%s' % (vmethod.parent_name, vmethod._make_name())
-            title = 'vfunc_%s' % title
-        return Formatter._format_vfunction_symbol (self, vmethod)
-
     def _format_members_list (self, members, member_designation, struct):
         language = struct.get_extension_attribute(self.extension.extension_name, 'language')
         if language != 'c':
@@ -317,12 +306,11 @@ class GIFormatter(Formatter):
 
         return super()._format_callable(callable_, callable_type, title, is_pointer)
 
-    def _format_property_symbol(self, prop):
+    def _format_property_prototype(self, prop, title, type_link):
         language = prop.get_extension_attribute(self.extension.extension_name, 'language')
         if language == 'python':
-            prop.link.title = 'self.props.%s' % prop.display_name.replace('-', '_')
-
-        return super()._format_property_symbol(prop)
+            title = 'self.props.%s' % title
+        return Formatter._format_property_prototype (self, prop, title, type_link)
 
     def _format_alias(self, alias):
         language = alias.get_extension_attribute(self.extension.extension_name, 'language')

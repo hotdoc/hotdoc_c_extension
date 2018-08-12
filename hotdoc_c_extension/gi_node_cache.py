@@ -3,8 +3,14 @@ from collections import defaultdict
 from lxml import etree
 import networkx as nx
 from hotdoc.core.symbols import QualifiedSymbol
+from hotdoc.core.exceptions import BadInclusionException
 from hotdoc_c_extension.gi_utils import *
 from hotdoc_c_extension.fundamentals import FUNDAMENTALS
+from hotdoc.utils.loggable import warn, Logger
+
+
+Logger.register_warning_code('missing-gir-include', BadInclusionException,
+                             'gi-extension')
 
 
 '''

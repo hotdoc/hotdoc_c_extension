@@ -33,7 +33,7 @@ from hotdoc.core.extension import Extension, ExtDependency
 from hotdoc.core.links import Link, LinkResolver
 from hotdoc.core.tree import Page
 from hotdoc.core.comment import Comment
-from hotdoc.core.exceptions import BadInclusionException, InvalidOutputException
+from hotdoc.core.exceptions import InvalidOutputException
 from hotdoc.utils.loggable import warn, Logger
 from hotdoc.utils.utils import OrderedSet
 
@@ -83,10 +83,6 @@ DEFAULT_PAGE_COMMENT = """/**
 * Unordered miscellaneous symbols that were not properly documented
 */
 """
-
-
-Logger.register_warning_code('missing-gir-include', BadInclusionException,
-                             'gi-extension')
 
 
 Logger.register_warning_code('no-location-indication', InvalidOutputException,

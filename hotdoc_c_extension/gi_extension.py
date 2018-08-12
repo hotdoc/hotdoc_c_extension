@@ -452,6 +452,8 @@ class GIExtension(Extension):
             return_value=retval, display_name=name,
             filename=filename, parent_name=parent_name)
 
+        self.__sort_parameters (sym, retval, parameters)
+
         return sym
 
     def __create_enum_symbol (self, node, spelling=None):
